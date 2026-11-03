@@ -1,0 +1,50 @@
+{
+  "name": "wechaty-puppet-neo",
+  "version": "0.1.0",
+  "description": "A standalone WeChat protocol Puppet for Wechaty",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "native/neo.node",
+    "native/THIRD-PARTY.txt",
+    "examples/ding-dong.mjs",
+    "docs/v1-spec.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/wechaty/puppet-neo",
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:native": "node scripts/build-native.mjs",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "ding-dong": "node examples/ding-dong.mjs"
+  },
+  "peerDependencies": {
+    "wechaty-puppet": "1.20.2"
+  },
+  "dependencies": {
+    "jsqr": "1.4.0",
+    "pngjs": "7.0.0",
+    "qrcode-terminal": "0.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pngjs": "6.0.5",
+    "typescript": "7.0.2",
+    "wechaty": "1.20.2"
+  }
+}

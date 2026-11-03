@@ -1,0 +1,8 @@
+node_modules/
+dist/
+native/target/
+native/*.node
+*.tgz
+*.memory-card.json
+.env*
+native/THIRD-PARTY.txt
