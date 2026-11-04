@@ -12,9 +12,13 @@ const destination = process.argv[2] ? resolve(process.argv[2]) : undefined
 const platform = `${process.platform}-${process.arch}`
 const requiredPlatforms = destination ? Object.keys(platforms) : [platform]
 const scratch = mkdtempSync(join(tmpdir(), 'neo-pack-'))
+const env = { ...process.env }
+// npm rejects a project install with the parent npm script's allow-scripts flag.
+delete env.npm_config_allow_scripts
 function run(command, args, cwd, capture = false) {
   const result = spawnSync(command, args, {
     cwd,
+    env,
     stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
     encoding: 'utf8',
   })
@@ -32,9 +36,7 @@ try {
     if (!pack.files.some(file => file.path === expected)) throw new Error(`Packed artifact is missing ${expected}`)
   }
   writeFileSync(join(scratch, 'package.json'), '{"name":"neo-package-test","private":true}')
-  // Wechaty 1.20.2's LevelDOWN dependency has no Windows ARM64 prebuild.
-  const installFlags = platform === 'win32-arm64' ? [] : ['--ignore-scripts']
-  run(process.execPath, [npmCli, 'install', ...installFlags, '--no-audit', join(scratch, pack.filename), 'wechaty@1.20.2'], scratch)
+  run(process.execPath, [npmCli, 'install', '--ignore-scripts', '--no-audit', join(scratch, pack.filename), 'wechaty@1.20.2'], scratch)
   for (const test of ['ding-dong.test.mjs', 'native.test.mjs']) copyFileSync(join(root, 'test', test), join(scratch, test))
   run(process.execPath, ['--test', 'ding-dong.test.mjs', 'native.test.mjs'], scratch)
   if (destination) {

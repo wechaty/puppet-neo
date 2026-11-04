@@ -34,6 +34,9 @@ type Addon = { [K in keyof Session]: (...args: Parameters<Session[K]>) => Promis
 
 export function openNativeSession(): Session {
   const platform = `${process.platform}-${process.arch}`
+  if (platform === 'win32-arm64') {
+    throw new Error('Run Neo with x64 Node.js on Windows 11 on ARM')
+  }
   if (!Object.hasOwn(platforms, platform)) {
     throw new Error(`Neo has no native build for ${platform}`)
   }
