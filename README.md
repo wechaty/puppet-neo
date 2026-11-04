@@ -2,6 +2,8 @@
 
 A standalone WeChat protocol Puppet for Wechaty. The first milestone exercises QR login, direct text replies, and clean session restart through Wechaty's MemoryCard. See the [v1 specification](docs/v1-spec.md) for the storage format and acceptance gates.
 
+[Watch the 22-second Ding Dong demo](docs/media/ding-dong-demo.mp4). The terminal recording shows a fresh QR login, a plain-text `ding`, and the matching `dong` in the recipient's chat.
+
 Build the local Linux x64 addon with Node 24, Rust 1.93.1, a C compiler, Make and Perl.
 
 ```sh
