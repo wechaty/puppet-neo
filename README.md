@@ -6,7 +6,15 @@ The 22-second Ding Dong demo shows a fresh QR login, a plain-text `ding`, and th
 
 https://github.com/user-attachments/assets/2087ba0d-6613-492c-8629-481303bad700
 
-Build the local Linux x64 addon with Node 24, Rust 1.93.1, a C compiler, Make and Perl.
+Neo's native build targets Linux with glibc, macOS, and Windows, each on x64 and ARM64. CI tests an npm install on each target and assembles one tarball with all six addons. Neo loads the addon for the architecture of the running Node process.
+
+To build from source, use Node 24 and Rust 1.93.1 with the matching Rust target.
+
+| Platform | Build prerequisites |
+| --- | --- |
+| Linux | C compiler, Make, Perl |
+| macOS | Xcode Command Line Tools, Make, Perl |
+| Windows | MSVC C++ tools for the target architecture, Windows SDK, Perl. Windows ARM64 also needs Python to build Wechaty 1.20.2's LevelDOWN dependency. |
 
 ```sh
 npm ci
@@ -22,4 +30,4 @@ node examples/ding-dong.mjs /private/test-state/neo EXACT_TEST_PEER run-one
 
 Scan the terminal QR. Send `ding run-one` from that peer and check for `dong run-one` on the recipient device. Stop with Ctrl+C and run the same command with `run-two`, the same card path and the same key. An accepted restore will go directly to ready.
 
-The current artifact is a local development build. The test suite separates simulated Wechaty behavior, native addon checks and real-account acceptance.
+The demo records a real-account test on Linux x64. CI on the other targets covers addon loading, npm installation, and simulated Wechaty behavior.

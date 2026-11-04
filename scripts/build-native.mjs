@@ -1,23 +1,26 @@
-import { copyFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import platforms from '../src/native-platforms.json' with { type: 'json' }
 
 const root = fileURLToPath(new URL('../', import.meta.url))
-if (process.platform !== 'linux' || process.arch !== 'x64' || !process.report.getReport().header.glibcVersionRuntime) {
-  throw new Error('Neo currently builds for Linux x64 with glibc')
+const platform = `${process.platform}-${process.arch}`
+const config = platforms[platform]
+if (!config) throw new Error(`Neo has no native build for ${platform}`)
+if (process.platform === 'linux' && !process.report.getReport().header.glibcVersionRuntime) {
+  throw new Error('Neo requires glibc on Linux')
 }
-const { status, error } = spawnSync('cargo', ['build', '--release', '--locked', '--manifest-path', 'native/Cargo.toml', '--target-dir', 'native/target'], {
-  cwd: root,
-  stdio: 'inherit',
-})
+const { status, error } = spawnSync('cargo', [
+  'build', '--release', '--locked', '--manifest-path', 'native/Cargo.toml',
+  '--target-dir', 'native/target', '--target', config.target,
+], { cwd: root, stdio: 'inherit' })
 if (error) throw error
 if (status !== 0) process.exit(status ?? 1)
-copyFileSync(new URL('../native/target/release/libpuppet_neo_native.so', import.meta.url), new URL('../native/neo.node', import.meta.url))
 
 const metadata = JSON.parse(execFileSync('cargo', [
   'metadata', '--locked', '--format-version', '1', '--manifest-path', 'native/Cargo.toml',
-  '--filter-platform', 'x86_64-unknown-linux-gnu',
+  '--filter-platform', config.target,
 ], { cwd: root, encoding: 'utf8' }))
 const notices = metadata.packages
   .filter(pkg => pkg.source)
@@ -32,4 +35,7 @@ const notices = metadata.packages
     return [`${pkg.name} ${pkg.version} (${pkg.license ?? 'see license text'})`, pkg.repository,
       ...[...paths].sort().map(path => readFileSync(join(directory, path), 'utf8'))].filter(Boolean).join('\n\n')
   })
-writeFileSync(new URL('../native/THIRD-PARTY.txt', import.meta.url), notices.join('\n\n---\n\n'))
+const output = join(root, 'native', platform)
+mkdirSync(output, { recursive: true })
+copyFileSync(join(root, 'native', 'target', config.target, 'release', config.binary), join(output, 'neo.node'))
+writeFileSync(join(output, 'THIRD-PARTY.txt'), notices.join('\n\n---\n\n'))

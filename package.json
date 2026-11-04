@@ -13,8 +13,8 @@
   },
   "files": [
     "dist",
-    "native/neo.node",
-    "native/THIRD-PARTY.txt",
+    "native/*/neo.node",
+    "native/*/THIRD-PARTY.txt",
     "examples/ding-dong.mjs",
     "docs/v1-spec.md"
   ],
@@ -31,7 +31,8 @@
     "build": "tsc",
     "build:native": "node scripts/build-native.mjs",
     "test": "npm run build && node --test test/*.test.mjs",
-    "ding-dong": "node examples/ding-dong.mjs"
+    "ding-dong": "node examples/ding-dong.mjs",
+    "test:package": "node scripts/test-package.mjs"
   },
   "peerDependencies": {
     "wechaty-puppet": "1.20.2"

@@ -1,0 +1,8 @@
+{
+  "linux-x64": { "target": "x86_64-unknown-linux-gnu", "binary": "libpuppet_neo_native.so" },
+  "linux-arm64": { "target": "aarch64-unknown-linux-gnu", "binary": "libpuppet_neo_native.so" },
+  "darwin-x64": { "target": "x86_64-apple-darwin", "binary": "libpuppet_neo_native.dylib" },
+  "darwin-arm64": { "target": "aarch64-apple-darwin", "binary": "libpuppet_neo_native.dylib" },
+  "win32-x64": { "target": "x86_64-pc-windows-msvc", "binary": "puppet_neo_native.dll" },
+  "win32-arm64": { "target": "aarch64-pc-windows-msvc", "binary": "puppet_neo_native.dll" }
+}

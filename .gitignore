@@ -1,8 +1,8 @@
 node_modules/
 dist/
 native/target/
-native/*.node
+native/**/*.node
 *.tgz
 *.memory-card.json
 .env*
-native/THIRD-PARTY.txt
+native/**/THIRD-PARTY.txt

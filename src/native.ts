@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import platforms from './native-platforms.json' with { type: 'json' }
 
 export interface Snapshot {
   version: number
@@ -32,11 +33,22 @@ export interface Session {
 type Addon = { [K in keyof Session]: (...args: Parameters<Session[K]>) => Promise<string> }
 
 export function openNativeSession(): Session {
-  if (process.platform !== 'linux' || process.arch !== 'x64' || !(process.report.getReport() as { header: { glibcVersionRuntime?: string } }).header.glibcVersionRuntime) {
-    throw new Error('This Neo build supports Linux x64 with glibc')
+  const platform = `${process.platform}-${process.arch}`
+  if (!Object.hasOwn(platforms, platform)) {
+    throw new Error(`Neo has no native build for ${platform}`)
+  }
+  const report = process.report.getReport() as { header: { glibcVersionRuntime?: string } }
+  if (process.platform === 'linux' && !report.header.glibcVersionRuntime) {
+    throw new Error('Neo requires glibc on Linux')
   }
   const require = createRequire(import.meta.url)
-  const { NeoSession } = require('../native/neo.node') as { NeoSession: new () => Addon }
+  const addonPath = `../native/${platform}/neo.node`
+  try {
+    require.resolve(addonPath)
+  } catch (error) {
+    throw new Error(`Neo native addon missing for ${platform}. Install a package for this platform or run npm run build:native from a source checkout.`, { cause: error })
+  }
+  const { NeoSession } = require(addonPath) as { NeoSession: new () => Addon }
   const addon = new NeoSession()
 
   return {
