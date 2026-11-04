@@ -6,9 +6,9 @@ The 22-second Ding Dong demo shows a fresh QR login, a plain-text `ding`, and th
 
 https://github.com/user-attachments/assets/2087ba0d-6613-492c-8629-481303bad700
 
-Neo's native build targets Linux with glibc and macOS on x64 and ARM64, plus Windows x64. CI tests an npm install on each target and assembles one tarball with all five addons. Neo loads the addon for the architecture of the running Node process.
+Neo's native build targets Linux and macOS on x64 and ARM64, plus Windows x64. CI tests an npm install on each target and assembles one tarball with all five addons. The prebuilt Linux addons require glibc 2.38 or newer. Neo loads the addon for the architecture of the running Node process.
 
-On Windows 11 on ARM, install **x64 Node.js** to use the x64 addon under Windows emulation. Run `node -p process.arch` to check that it prints `x64`.
+On Windows 11 on ARM, install **x64 Node.js** to use the x64 addon under Windows emulation. Run `node -p process.arch` to check that it prints `x64`. [Microsoft's emulation documentation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation)
 
 To build from source, use Node 24 and Rust 1.93.1 with the matching Rust target.
 
