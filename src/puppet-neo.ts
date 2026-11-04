@@ -176,21 +176,27 @@ export class PuppetNeo extends Puppet {
     this.online = true
     this.rememberContact(username)
     await this.login(username)
+    const associated = await session.heartbeat()
+    signal.throwIfAborted()
+    let nextHeartbeat = performance.now() + associated.intervalMs
     this.emit('ready', {})
-    await this.drain(session, true, signal)
+    await this.drain(session, 6, signal)
     while (!signal.aborted) {
-      const beat = await session.heartbeat()
-      signal.throwIfAborted()
-      if (beat.sync) await this.drain(session, false, signal)
-      await delay(beat.intervalMs, undefined, { signal })
+      if (performance.now() >= nextHeartbeat) {
+        const beat = await session.heartbeat()
+        signal.throwIfAborted()
+        nextHeartbeat = performance.now() + beat.intervalMs
+        if (beat.sync) await this.drain(session, 7, signal)
+      }
+      if (await session.pollIncoming()) await this.drain(session, 1, signal)
     }
   }
 
-  private async drain(session: Session, initial: boolean, signal: AbortSignal): Promise<void> {
+  private async drain(session: Session, scene: 1 | 6 | 7, signal: AbortSignal): Promise<void> {
     let more: boolean
     do {
       signal.throwIfAborted()
-      const page = await session.sync(initial)
+      const page = await session.sync(scene)
       signal.throwIfAborted()
       for (const code of page.unsupported) {
         if (this.unsupported.has(code)) continue

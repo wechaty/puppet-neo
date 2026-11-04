@@ -1,6 +1,6 @@
 mod storage;
 
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use napi::{bindgen_prelude::AsyncTask, Env, Task};
 use napi_derive::napi;
@@ -22,6 +22,7 @@ const MAX_UNHANDLED_BYTES: usize = 32 * 1024 * 1024;
 struct Session {
     attempt: Option<LoginAttempt>,
     account: Option<AccountState>,
+    incoming: Option<wechat_protocol::push::Connection>,
     /// Network progress can run ahead of the saved cursor while unknown commands remain in memory.
     received_cursor: Vec<u8>,
     checkpoint: Vec<u8>,
@@ -46,7 +47,8 @@ enum Operation {
     Restore(storage::Envelope),
     Snapshot,
     Heartbeat,
-    Sync { initial: bool },
+    PollIncoming,
+    Sync { scene: u32 },
     FinishPage,
     SendText { destination: String, text: String },
 }
@@ -98,8 +100,13 @@ impl NeoSession {
     }
 
     #[napi]
-    pub fn sync(&self, initial: bool) -> AsyncTask<NeoTask> {
-        self.task(Operation::Sync { initial })
+    pub fn sync(&self, scene: u32) -> AsyncTask<NeoTask> {
+        self.task(Operation::Sync { scene })
+    }
+
+    #[napi]
+    pub fn poll_incoming(&self) -> AsyncTask<NeoTask> {
+        self.task(Operation::PollIncoming)
     }
 
     #[napi]
@@ -148,6 +155,7 @@ impl Task for NeoTask {
             Operation::Restore(_) => "restore the saved session",
             Operation::Snapshot => "seal the session snapshot",
             Operation::Heartbeat => "check session heartbeat",
+            Operation::PollIncoming => "wait for incoming message notifications",
             Operation::Sync { .. } => "read a sync page",
             Operation::FinishPage => "finish a sync page",
             Operation::SendText { .. } => "prepare a text send",
@@ -232,12 +240,29 @@ fn run(session: &mut Session, key: &[u8; 32], operation: Operation) -> Result<Va
                 .account
                 .as_mut()
                 .ok_or_else(|| anyhow!("No active session"))?;
-            let beat = client.heartbeat(state, &session.received_cursor)?;
+            if session.incoming.is_none() {
+                session.incoming = Some(client.push_connection(state)?);
+            }
+            let connection = session
+                .incoming
+                .as_mut()
+                .context("No incoming connection")?;
+            let beat = connection.heartbeat(state, &session.received_cursor)?;
             Ok(
-                json!({ "sync": beat.selector & 7 != 0, "intervalMs": beat.next_interval.clamp(5, 30) * 1000 }),
+                json!({ "sync": beat.selector & 7 != 0, "intervalMs": beat.next_interval.clamp(30, 180) * 1000 }),
             )
         }
-        Operation::Sync { initial } => {
+        Operation::PollIncoming => {
+            let connection = session
+                .incoming
+                .as_mut()
+                .context("No incoming connection")?;
+            let notification = connection.poll(Duration::from_secs(1))?;
+            Ok(json!(notification.is_some_and(
+                |hint| hint.command == 24 && hint.selector & 7 != 0
+            )))
+        }
+        Operation::Sync { scene } => {
             ensure!(
                 !session.pending_checkpoint,
                 "Previous sync page was not handed off"
@@ -246,8 +271,11 @@ fn run(session: &mut Session, key: &[u8; 32], operation: Operation) -> Result<Va
                 .account
                 .as_mut()
                 .ok_or_else(|| anyhow!("No active session"))?;
-            let batch =
-                client.sync_scene(state, &session.received_cursor, if initial { 6 } else { 7 })?;
+            let connection = session
+                .incoming
+                .as_mut()
+                .context("No incoming connection")?;
+            let batch = connection.sync(state, &session.received_cursor, scene)?;
             let page = classify_page(batch.commands, &state.own_username);
             let page_bytes = page
                 .unhandled

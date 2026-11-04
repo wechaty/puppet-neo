@@ -12,6 +12,7 @@ const username = 'fixture-self'
 const sender = 'fixture-peer'
 
 function scriptedPuppet(id, result, trace) {
+  let notified = false
   const session = {
     async startLogin() {
       trace.push('start-login')
@@ -31,7 +32,18 @@ function scriptedPuppet(id, result, trace) {
     async heartbeat() {
       return { sync: false, intervalMs: 5000 }
     },
-    async sync() {
+    async pollIncoming() {
+      if (notified) {
+        await new Promise(resolve => setTimeout(resolve, 15))
+        return false
+      }
+      notified = true
+      return true
+    },
+    async sync(scene) {
+      trace.push(['sync', scene])
+      if (scene === 6) return { messages: [], unsupported: [], continuation: false }
+      assert.equal(scene, 1)
       return {
         messages: [{ id, from: sender, to: username, text: 'ding', timestamp: 1700000000 }],
         unsupported: [],
@@ -70,7 +82,7 @@ test('real Wechaty delivers text, replies once, and restores a named MemoryCard'
         assert.equal(message.talker().id, sender)
         if (result === 'accepted') assert.equal(await message.say('dong'), undefined)
         else await assert.rejects(message.say('dong'), /outcome is uncertain/)
-        assert.deepEqual(trace, [run === 1 ? 'start-login' : 'restore', ['send', sender, 'dong']])
+        assert.deepEqual(trace, [run === 1 ? 'start-login' : 'restore', ['sync', 6], ['sync', 1], ['send', sender, 'dong']])
         assert.equal(scans.includes(ScanStatus.Waiting), run === 1)
         assert.deepEqual(errors, [])
       } finally {

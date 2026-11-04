@@ -18,7 +18,7 @@ Wechaty bot
   -> WeChat servers
 ```
 
-Neo builds the addon from pinned crate sources. Cargo.lock and package-lock.json pin build inputs. Blocking native calls run off the Node event loop and a Rust lock serializes session access. TypeScript schedules login polling, sync and heartbeat, maps incoming text, and saves sealed snapshots using the supplied Wechaty MemoryCard.
+Neo builds the addon from pinned crate sources. Cargo.lock and package-lock.json pin build inputs. Blocking native calls run off the Node event loop and a Rust lock serializes session access. TypeScript schedules login polling, sync and heartbeat, maps incoming text, and saves sealed snapshots using the supplied Wechaty MemoryCard. After authentication, Neo associates a persistent incoming connection with the account. It drains initial catch-up, then requests NewSync when that connection signals message work. A heartbeat can also signal pending work.
 
 For protocol contributors, follow `messageSendText()` in [the Puppet](../src/puppet-neo.ts) into the [native session](../native/src/lib.rs), then see `send_text` and `text_send_request` in the [published Rust source](https://docs.rs/crate/wechat-protocol/1.4.0/source/src/). Incoming text follows the reverse direction through NewSync and AddMsg decoding. Neo publishes only direct text events with a known server message ID. Keep message IDs as strings. Store the payload in the bounded memory cache before emitting its ID so Wechaty can hydrate its Message object.
 
