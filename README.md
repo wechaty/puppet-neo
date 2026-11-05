@@ -1,12 +1,12 @@
 # Wechaty Puppet Neo
 
-A standalone WeChat protocol Puppet for Wechaty. The first milestone exercises QR login, direct text replies, and clean session restart through Wechaty's MemoryCard. See the [v1 specification](docs/v1-spec.md) for the storage format and acceptance gates.
+A standalone WeChat protocol Puppet for Wechaty. The TypeScript example uses PuppetNeo directly to log in with a QR code and reply to direct text messages. Authentication stays in memory, so each run needs a fresh QR scan. See the [v1 specification](docs/v1-spec.md) for the architecture and acceptance gates.
 
-The 22-second Ding Dong demo shows a fresh QR login, a plain-text `ding`, and the matching `dong` in the recipient's chat.
+The 30-second live terminal demo shows QR login and the standalone TypeScript example exchanging `ding` and `dong` with a second account. It was recorded on Linux x64 with protocol crate 1.4.0. Idle waits are cut.
 
-https://github.com/user-attachments/assets/2087ba0d-6613-492c-8629-481303bad700
+https://github.com/user-attachments/assets/e7e40c19-ad49-4061-be53-cef1e1c4c978
 
-Neo's native build targets Linux and macOS on x64 and ARM64, plus Windows x64. CI tests an npm install on each target and assembles one tarball with all five addons. The prebuilt Linux addons require glibc 2.38 or newer. Neo loads the addon for the architecture of the running Node process.
+Neo builds native addons for Linux x64 and ARM64, macOS on Apple Silicon, and Windows x64. CI tests an npm install on each target and assembles one tarball with all four addons. The prebuilt Linux addons require glibc 2.38 or newer. Neo loads the addon for the architecture of the running Node process. Use ARM64 Node.js on macOS.
 
 On Windows 11 on ARM, install **x64 Node.js** to use the x64 addon under Windows emulation. Run `node -p process.arch` to check that it prints `x64`. [Microsoft's emulation documentation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation)
 
@@ -15,14 +15,21 @@ To build from source, use Node 24 and Rust 1.93.1 with the matching Rust target.
 | Platform | Build prerequisites |
 | --- | --- |
 | Linux | C compiler, Make, Perl |
-| macOS | Xcode Command Line Tools, Make, Perl |
+| macOS on Apple Silicon | Xcode Command Line Tools, Make, Perl |
 | Windows x64 | MSVC x64 C++ tools, Windows SDK, Perl |
 
 ```sh
 npm ci
 npm run build:native
-npm test
+npm run build
+node examples/ding-dong-bot.ts
 ```
+
+Scan the terminal QR and confirm the login on your phone. After `Ready` appears, send `ding` from another WeChat account. The example replies with `dong` and prints the received message and reply. Stop with Ctrl+C. Starting it again displays a new QR.
+
+Node runs the TypeScript example directly. The commands above build the package and native addon from source. To use a prebuilt tarball in another project, install the tarball and copy its `examples/ding-dong-bot.ts` into that project before running it.
+
+Run `npm test` for type checking and the offline tests, and `npm run test:package` to check a clean tarball installation.
 
 ### Development container
 
@@ -32,12 +39,4 @@ The configuration in [`.devcontainer/devcontainer.json`](.devcontainer/devcontai
 
 Windows contributors must use WSL to open the repository and run the dev container; native Windows host initialization is unsupported. Install the VS Code Dev Containers extension, then run **Dev Containers: Reopen in Container** from the Command Palette.
 
-For controlled live acceptance, use a private directory for the card and supply a Base64-encoded random 32-byte key through `PUPPET_NEO_SESSION_KEY`. Keep the key separately so both runs use the same value. Supply the exact username of the confirmed test peer and a fresh challenge.
-
-```sh
-node examples/ding-dong.mjs /private/test-state/neo EXACT_TEST_PEER run-one
-```
-
-Scan the terminal QR. Send `ding run-one` from that peer and check for `dong run-one` on the recipient device. Stop with Ctrl+C and run the same command with `run-two`, the same card path and the same key. An accepted restore will go directly to ready.
-
-The demo records a real-account test on Linux x64. CI on the other targets covers addon loading, npm installation, and simulated Wechaty behavior.
+For live acceptance, use an isolated test account and a confirmed peer. The example replies to direct `ding` messages, including messages received during initial sync. Verify `dong` on the peer's device. Real-account testing has covered Linux x64. CI on the other targets covers addon loading, npm installation, and scripted Puppet behavior.

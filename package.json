@@ -15,11 +15,11 @@
     "dist",
     "native/*/neo.node",
     "native/*/THIRD-PARTY.txt",
-    "examples/ding-dong.mjs",
+    "examples/ding-dong-bot.ts",
     "docs/v1-spec.md"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18.0"
   },
   "license": "Apache-2.0",
   "repository": "https://github.com/wechaty/puppet-neo",
@@ -30,8 +30,9 @@
   "scripts": {
     "build": "tsc",
     "build:native": "node scripts/build-native.mjs",
-    "test": "npm run build && node --test test/*.test.mjs",
-    "ding-dong": "node examples/ding-dong.mjs",
+    "typecheck": "tsc --project tsconfig.check.json",
+    "test": "npm run build && npm run typecheck && node --test test/*.test.ts",
+    "ding-dong": "node examples/ding-dong-bot.ts",
     "test:package": "node scripts/test-package.mjs"
   },
   "peerDependencies": {
@@ -45,7 +46,7 @@
   "devDependencies": {
     "@types/node": "24.19.2",
     "@types/pngjs": "6.0.5",
-    "typescript": "7.0.2",
-    "wechaty": "1.20.2"
+    "@types/qrcode-terminal": "0.12.2",
+    "typescript": "7.0.2"
   }
 }

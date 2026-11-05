@@ -2,9 +2,8 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { Puppet, types, type payloads, type PuppetOptions } from 'wechaty-puppet'
 import jsQR from 'jsqr'
 import { PNG } from 'pngjs'
-import { openNativeSession, type Session, type Snapshot } from './native.js'
+import { openNativeSession, type Session } from './native.js'
 
-const SESSION_KEY = 'puppet-neo.session'
 const CACHE_LIMIT = 2048
 
 function putRecent<T>(cache: Map<string, T>, id: string, value: T) {
@@ -35,12 +34,10 @@ export class PuppetNeo extends Puppet {
   private run?: Promise<void>
   private abort?: AbortController
   private session?: Session
-  private authenticated = false
   private online = false
   private pendingSends = new Set<Promise<unknown>>()
   private readonly contacts = new Map<string, payloads.Contact>()
   private readonly messages = new Map<string, payloads.Message>()
-  private readonly unsupported = new Set<number>()
 
   constructor(options: PuppetOptions = {}) {
     super(options)
@@ -55,7 +52,6 @@ export class PuppetNeo extends Puppet {
   }
 
   override async onStart(): Promise<void> {
-    if (!this.memory.name) throw new Error('Configure a named Wechaty MemoryCard for Neo')
     const abort = new AbortController()
     const session = this.createSession()
     this.abort = abort
@@ -68,20 +64,16 @@ export class PuppetNeo extends Puppet {
   }
 
   override async onStop(): Promise<void> {
-    const session = this.session
     this.abort?.abort()
     try {
       await this.run
       await Promise.allSettled(this.pendingSends)
-      if (session && this.authenticated) await this.save(session)
     } finally {
-      this.authenticated = false
       this.abort = undefined
       this.session = undefined
       this.run = undefined
       this.contacts.clear()
       this.messages.clear()
-      this.unsupported.clear()
       if (this.isLoggedIn) await super.logout()
     }
   }
@@ -132,11 +124,6 @@ export class PuppetNeo extends Puppet {
     })
   }
 
-  private async save(session: Session): Promise<void> {
-    await this.memory.set(SESSION_KEY, await session.snapshot())
-    await this.memory.save()
-  }
-
   private async loginWithQr(session: Session, signal: AbortSignal): Promise<string> {
     const qr = this.scanCode((await session.startLogin()).png)
     signal.throwIfAborted()
@@ -165,14 +152,8 @@ export class PuppetNeo extends Puppet {
 
   private async serve(session: Session, signal: AbortSignal): Promise<void> {
     await delay(0, undefined, { signal })
-    const stored = await this.memory.get<Snapshot>(SESSION_KEY)
-    const username = stored == null
-      ? await this.loginWithQr(session, signal)
-      : (await session.restore(stored)).username
+    const username = await this.loginWithQr(session, signal)
     signal.throwIfAborted()
-    await this.save(session)
-    signal.throwIfAborted()
-    this.authenticated = true
     this.online = true
     this.rememberContact(username)
     await this.login(username)
@@ -198,11 +179,6 @@ export class PuppetNeo extends Puppet {
       signal.throwIfAborted()
       const page = await session.sync(scene)
       signal.throwIfAborted()
-      for (const code of page.unsupported) {
-        if (this.unsupported.has(code)) continue
-        this.unsupported.add(code)
-        this.emit('error', { data: `Neo retained sync command ${code}; the saved checkpoint may lag` })
-      }
       for (const item of page.messages) {
         if (this.messages.has(item.id)) continue
         this.rememberContact(item.from)
@@ -213,7 +189,6 @@ export class PuppetNeo extends Puppet {
         })
         this.emit('message', { messageId: item.id })
       }
-      await session.finishPage()
       more = page.continuation
     } while (more)
   }
