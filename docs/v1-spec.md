@@ -27,7 +27,7 @@ The example listens for Puppet events, retrieves messages with `messagePayload()
 ding-dong-bot.ts
   -> PuppetNeo (TypeScript, Puppet events and payload lookup)
   -> NeoSession (.node, Rust account credentials and protocol operations)
-  -> wechat-protocol = 1.4.0 (published Cargo source)
+  -> wechat-protocol = 1.5.1 (published Cargo source)
   -> WeChat servers
 ```
 
@@ -35,7 +35,7 @@ Neo builds the addon from pinned crate sources. Cargo.lock and package-lock.json
 
 Blocking native calls run off the Node event loop, and a Rust lock serializes session access. TypeScript schedules login polling, sync and heartbeat, then maps incoming text to Puppet payloads and events. After authentication, Neo opens the account's incoming connection, drains initial sync, and requests NewSync when that connection or a heartbeat signals message work.
 
-For protocol contributors, follow `messageSendText()` in [the Puppet](../src/puppet-neo.ts) into the [native session](../native/src/lib.rs), then see `send_text` and `text_send_request` in the [published Rust source](https://docs.rs/crate/wechat-protocol/1.4.0/source/src/). Incoming text follows the reverse direction through NewSync and AddMsg decoding.
+For protocol contributors, follow `messageSendText()` in [the Puppet](../src/puppet-neo.ts) into the [native session](../native/src/lib.rs), then see `send_text` and `text_send_request` in the [published Rust source](https://docs.rs/crate/wechat-protocol/1.5.1/source/src/). Incoming text follows the reverse direction through NewSync and AddMsg decoding.
 
 ## State and errors
 

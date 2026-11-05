@@ -1553,9 +1553,9 @@ dependencies = [
 
 [[package]]
 name = "wechat-media"
-version = "1.4.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd2ca206948ccea1b6854795c741e6882e1eef0fad68bccad6ae8e158215a204"
+checksum = "913f62d1b7b3847d953b5b1343cdccb0ab4a133bdd398c8a2a885a28f73b84d4"
 dependencies = [
  "anyhow",
  "image",
@@ -1567,9 +1567,9 @@ dependencies = [
 
 [[package]]
 name = "wechat-platform"
-version = "1.4.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "888fb046d50afab3cc36dedd18c4f0ac762d5c837e774130dc9fb41661008292"
+checksum = "7f7c55b21ee692da8b769e86f759d2892eb9fecccd7544c9d0e2757563b6379f"
 dependencies = [
  "libc",
  "tempfile",
@@ -1578,9 +1578,9 @@ dependencies = [
 
 [[package]]
 name = "wechat-protocol"
-version = "1.4.0"
+version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "482a1e596a5a52dddbaf0c9a82cb988460d2a798a3f7500c16181a0c10ddbc95"
+checksum = "a8ddb77ffef5b79d1fbe600d5b9cfaf7d55f75e90e7d67b00700a5ffff922557"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
