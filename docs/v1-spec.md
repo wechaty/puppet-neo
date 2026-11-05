@@ -1,64 +1,61 @@
 # Puppet Neo v1 specification
 
-Puppet Neo is a local WeChat protocol Puppet for Wechaty. Its long-term goal is comprehensive protocol coverage through open source. The first development milestone covers QR login, direct text, a clean stop, and session resume in a new Node process.
+Puppet Neo is a local WeChat protocol Puppet for Wechaty. Its long-term goal is comprehensive protocol coverage through open source. The first milestone covers QR login and direct text Ding Dong through the Puppet API.
 
 ## First acceptance gate
 
-Start with one Linux x64 Wechaty bot. Use an isolated test account and confirm the separate test peer before sending. Install the Neo tarball in a fresh Node project, run the Ding Dong example, scan the QR code, and send the unique challenge from that peer. Confirm the official recipient client received exactly one matching reply. Stop the bot and run it in a fresh process with the same MemoryCard and key. Confirm the same account resumes without a scan and repeat the exchange with a different challenge.
+Use an isolated Linux x64 test account and a confirmed separate peer. Build the addon and package, then run the repository example.
 
-Follow this with the offline tests for corrupted or incorrectly keyed snapshots and lost send responses. A clean restart is the milestone's recovery promise. A process crash can leave an older checkpoint, and Wechaty event delivery has no acknowledgment for the bot's business logic.
+```sh
+npm ci
+npm run build:native
+npm run build
+node examples/ding-dong-bot.ts
+```
+
+1. Scan the QR displayed in the terminal and confirm the login on the phone.
+2. Wait for `Ready`, then send one new `ding` from the peer.
+3. Check that the terminal prints the incoming message and reply, and that the peer receives exactly one `dong`.
+4. Stop with Ctrl+C and run the command again. Verify that a fresh QR scan is required and repeat the exchange.
+5. Install an npm tarball in a fresh project, copy its TypeScript example into that project, and repeat the test using the installed package.
+
+The example listens for Puppet events, retrieves messages with `messagePayload()`, and replies with `messageSendText()`. It handles direct text from other accounts. Initial sync can deliver earlier messages, so inspect the test conversation before the exchange.
 
 ## Architecture
 
 ```text
-Wechaty bot
-  -> PuppetNeo (TypeScript, Wechaty events and payload lookup)
-  -> NeoSession (.node, one Rust owner for account credentials and protocol operations)
+ding-dong-bot.ts
+  -> PuppetNeo (TypeScript, Puppet events and payload lookup)
+  -> NeoSession (.node, Rust account credentials and protocol operations)
   -> wechat-protocol = 1.4.0 (published Cargo source)
   -> WeChat servers
 ```
 
-Neo builds the addon from pinned crate sources. Cargo.lock and package-lock.json pin build inputs. Native CI builds and tests x64 and ARM64 addons on Linux with glibc and macOS, plus Windows x64. The combined npm tarball contains all five builds and selects one using Node’s platform and architecture. Blocking native calls run off the Node event loop and a Rust lock serializes session access. TypeScript schedules login polling, sync and heartbeat, maps incoming text, and saves sealed snapshots using the supplied Wechaty MemoryCard. After authentication, Neo associates a persistent incoming connection with the account. It drains initial catch-up, then requests NewSync when that connection signals message work. A heartbeat can also signal pending work.
+Neo builds the addon from pinned crate sources. Cargo.lock and package-lock.json pin build inputs. Native CI builds and tests x64 and ARM64 addons on Linux with glibc and macOS, plus Windows x64. The combined npm tarball contains all five builds and selects one using Node's platform and architecture. The CI-built Linux addons require glibc 2.38 or newer.
 
-For protocol contributors, follow `messageSendText()` in [the Puppet](../src/puppet-neo.ts) into the [native session](../native/src/lib.rs), then see `send_text` and `text_send_request` in the [published Rust source](https://docs.rs/crate/wechat-protocol/1.4.0/source/src/). Incoming text follows the reverse direction through NewSync and AddMsg decoding. Neo publishes only direct text events with a known server message ID. Keep message IDs as strings. Store the payload in the bounded memory cache before emitting its ID so Wechaty can hydrate its Message object.
+Blocking native calls run off the Node event loop, and a Rust lock serializes session access. TypeScript schedules login polling, sync and heartbeat, then maps incoming text to Puppet payloads and events. After authentication, Neo opens the account's incoming connection, drains initial sync, and requests NewSync when that connection or a heartbeat signals message work.
 
-QR challenge state, current credentials, received payloads, and send attempts stay in memory. An accepted text send resolves with no Message object. An uncertain send is surfaced to the caller and submits only once. The example limits sends to one explicitly selected peer and one fresh challenge per process. It ignores self messages and rooms. Session work ends if polling, heartbeat or sync fails. The caller can stop and restart after resolving the error.
+For protocol contributors, follow `messageSendText()` in [the Puppet](../src/puppet-neo.ts) into the [native session](../native/src/lib.rs), then see `send_text` and `text_send_request` in the [published Rust source](https://docs.rs/crate/wechat-protocol/1.4.0/source/src/). Incoming text follows the reverse direction through NewSync and AddMsg decoding.
 
-## MemoryCard format
+## State and errors
 
-Use a named MemoryCard and one bot process per card. Neo uses the logical key `puppet-neo.session` in Wechaty's Puppet namespace. Its value is:
+Rust holds the QR challenge, device identity, authentication credentials and sync cursor in memory. TypeScript keeps the most recent 2,048 message and contact payloads for Puppet lookups and duplicate suppression. A fresh start creates a new session and QR challenge. Stopping ends session work and clears the payload caches.
 
-```json
-{
-  "version": 1,
-  "nonce": "<Base64 12-byte nonce>",
-  "ciphertext": "<Base64 ciphertext followed by the 16-byte tag>"
-}
-```
+Session state lasts for the running process. Neo neither exports nor restores authentication snapshots. Existing MemoryCard files from earlier development builds are ignored by Neo's authentication code. Wechaty Puppet's inherited MemoryCard abstraction remains part of its base API.
 
-Rust encrypts the record with AES-256-GCM, a fresh random nonce per save, and a versioned Neo context. The example supplies the same random 32-byte Base64 key on both runs through `PUPPET_NEO_SESSION_KEY`. Store that secret separately from the MemoryCard file. The file backend stores JSON.
+Unhandled sync commands are silently discarded while the received cursor advances. Neo emits direct text messages with a known server message ID and keeps IDs as strings. It caches each payload before emitting its ID so callers can retrieve it.
 
-| Encrypted field | Value |
-| --- | --- |
-| `protocolCrateVersion` | Exact crate version that wrote the snapshot |
-| `account` | WeChat UIN as a decimal string, and authenticated username |
-| `device` | Crate DeviceProfile with device ID, device type and client version |
-| `credentials` | Cookie, session/request/response keys, AutoAuth key and key information as Base64 |
-| `routing` | Accepted long and short connection hosts |
-| `sync.cursor` | Last usable checkpoint as Base64, or null before the first checkpoint |
-
-The snapshot deliberately excludes the official database password, raw auth sections and message contents. Restore validates the envelope and protocol state before renewing with WeChat. Neo verifies that the resulting account matches the snapshot, then saves the accepted result. An invalid snapshot or unsuccessful renewal reports an error and keeps the old file for investigation. To scan anew, use a new card name or deliberately move the old card aside.
-
-Save after QR login or verified restore, and again on clean stop. The received network cursor may run ahead in memory. Neo retains unhandled commands in a bounded in-memory buffer and freezes the saved checkpoint behind them. A restart can replay from that earlier point. Hitting the retention limit stops sync with an error. A new run of the Ding Dong example uses a new challenge so replayed traffic cannot trigger its reply.
+An accepted send resolves with no Message object. An uncertain send is reported to the caller after a single submission. Polling, heartbeat or sync failures stop the session loop and emit an error. The caller can stop and start again to log in afresh.
 
 ## Validation and release gates
 
 | Gate | Evidence to collect |
 | --- | --- |
-| Rust storage and send | Seal/open round trip, wrong-key and tamper rejection, unknown sync command retention, lost acknowledgment handled once |
-| Wechaty adapter | Real Wechaty with a scripted session drives login, direct text hydration, one reply attempt and named MemoryCard restore |
-| Native boundary | Build the locked crate, load the addon in Node and reject invalid saved state without contacting WeChat |
-| Package | Install an npm tarball in a fresh project and run the adapter and native smoke tests without a compiler |
-| Live acceptance | First login and Ding Dong, then a fresh-process restore and second Ding Dong with an isolated test account |
+| Rust behavior | Unhandled sync commands skipped and lost send acknowledgment handled once |
+| Puppet API | Scripted session drives QR login, text payload lookup, reply, clean stop and a fresh login |
+| Example | The actual TypeScript example runs against a scripted session and replies through PuppetNeo |
+| Native boundary | Load the addon without a storage key and reject unauthenticated operations |
+| Package | Install a tarball in a fresh project and run the Puppet, native and example tests |
+| Live acceptance | Fresh QR login and Ding Dong with an isolated test account, then repeat after restarting |
 
-Start with an npm development release on `next` after acceptance. Follow Wechaty's odd-minor development and even-minor stable convention. Publish only the targets that have passed their package tests and list live acceptance separately. Review the repository, installed example, storage behavior and release workflow with the Wechaty maintainers before expanding scope or promoting a stable release. Use the combined tarball after its five native package checks pass. Automatic publication and changes to the upstream crate follow the evidence from this milestone.
+Start with an npm development release on `next` after acceptance. Follow Wechaty's odd-minor development and even-minor stable convention. Use the combined tarball after its five native package checks pass and report live acceptance separately. Review the repository, installed example and release workflow with the Wechaty maintainers before expanding scope or promoting a stable release. Automatic publication follows that review.

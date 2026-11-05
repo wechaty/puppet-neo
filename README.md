@@ -1,8 +1,8 @@
 # Wechaty Puppet Neo
 
-A standalone WeChat protocol Puppet for Wechaty. The first milestone exercises QR login, direct text replies, and clean session restart through Wechaty's MemoryCard. See the [v1 specification](docs/v1-spec.md) for the storage format and acceptance gates.
+A standalone WeChat protocol Puppet for Wechaty. The TypeScript example uses PuppetNeo directly to log in with a QR code and reply to direct text messages. Authentication stays in memory, so each run needs a fresh QR scan. See the [v1 specification](docs/v1-spec.md) for the architecture and acceptance gates.
 
-The 22-second Ding Dong demo shows a fresh QR login, a plain-text `ding`, and the matching `dong` in the recipient's chat.
+The earlier Linux x64 demo shows a fresh QR login, a plain-text `ding`, and the matching `dong` in the recipient's chat.
 
 https://github.com/user-attachments/assets/2087ba0d-6613-492c-8629-481303bad700
 
@@ -21,8 +21,15 @@ To build from source, use Node 24 and Rust 1.93.1 with the matching Rust target.
 ```sh
 npm ci
 npm run build:native
-npm test
+npm run build
+node examples/ding-dong-bot.ts
 ```
+
+Scan the terminal QR and confirm the login on your phone. After `Ready` appears, send `ding` from another WeChat account. The example replies with `dong` and prints the received message and reply. Stop with Ctrl+C. Starting it again displays a new QR.
+
+Node runs the TypeScript example directly. The commands above build the package and native addon from source. To use a prebuilt tarball in another project, install the tarball and copy its `examples/ding-dong-bot.ts` into that project before running it.
+
+Run `npm test` for type checking and the offline tests, and `npm run test:package` to check a clean tarball installation.
 
 ### Development container
 
@@ -32,12 +39,4 @@ The configuration in [`.devcontainer/devcontainer.json`](.devcontainer/devcontai
 
 Windows contributors must use WSL to open the repository and run the dev container; native Windows host initialization is unsupported. Install the VS Code Dev Containers extension, then run **Dev Containers: Reopen in Container** from the Command Palette.
 
-For controlled live acceptance, use a private directory for the card and supply a Base64-encoded random 32-byte key through `PUPPET_NEO_SESSION_KEY`. Keep the key separately so both runs use the same value. Supply the exact username of the confirmed test peer and a fresh challenge.
-
-```sh
-node examples/ding-dong.mjs /private/test-state/neo EXACT_TEST_PEER run-one
-```
-
-Scan the terminal QR. Send `ding run-one` from that peer and check for `dong run-one` on the recipient device. Stop with Ctrl+C and run the same command with `run-two`, the same card path and the same key. An accepted restore will go directly to ready.
-
-The demo records a real-account test on Linux x64. CI on the other targets covers addon loading, npm installation, and simulated Wechaty behavior.
+For live acceptance, use an isolated test account and a confirmed peer. The example replies to direct `ding` messages, including messages received during initial sync. Verify `dong` on the peer's device. Real-account testing has covered Linux x64. CI on the other targets covers addon loading, npm installation, and scripted Puppet behavior.

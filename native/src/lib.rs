@@ -1,5 +1,3 @@
-mod storage;
-
 use anyhow::{anyhow, ensure, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use napi::{bindgen_prelude::AsyncTask, Env, Task};
@@ -13,22 +11,15 @@ use std::{
 use wechat_protocol::{
     wire, AccountState, DeviceProfile, LoginAttempt, LoginStatus, NativeClient, NativeOptions,
 };
-use zeroize::Zeroizing;
 
 const DEVICE_NAME: &str = "Puppet Neo";
-const MAX_UNHANDLED_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Default)]
 struct Session {
     attempt: Option<LoginAttempt>,
     account: Option<AccountState>,
     incoming: Option<wechat_protocol::push::Connection>,
-    /// Network progress can run ahead of the saved cursor while unknown commands remain in memory.
     received_cursor: Vec<u8>,
-    checkpoint: Vec<u8>,
-    unhandled: Vec<wire::SyncCommand>,
-    unhandled_bytes: usize,
-    pending_checkpoint: bool,
 }
 
 #[derive(Serialize)]
@@ -44,32 +35,23 @@ struct TextMessage {
 enum Operation {
     StartLogin,
     PollLogin,
-    Restore(storage::Envelope),
-    Snapshot,
     Heartbeat,
     PollIncoming,
     Sync { scene: u32 },
-    FinishPage,
     SendText { destination: String, text: String },
 }
 
 #[napi]
+#[derive(Default)]
 pub struct NeoSession {
     session: Arc<Mutex<Session>>,
-    key: Arc<Zeroizing<[u8; 32]>>,
 }
 
 #[napi]
 impl NeoSession {
     #[napi(constructor)]
-    pub fn new() -> napi::Result<Self> {
-        let key = storage::key_from_env().map_err(|_| {
-            napi::Error::from_reason("Set PUPPET_NEO_SESSION_KEY to a Base64-encoded 32-byte key")
-        })?;
-        Ok(Self {
-            session: Default::default(),
-            key: Arc::new(key),
-        })
+    pub fn new() -> Self {
+        Self::default()
     }
 
     #[napi]
@@ -80,18 +62,6 @@ impl NeoSession {
     #[napi]
     pub fn poll_login(&self) -> AsyncTask<NeoTask> {
         self.task(Operation::PollLogin)
-    }
-
-    #[napi]
-    pub fn restore(&self, envelope: Value) -> napi::Result<AsyncTask<NeoTask>> {
-        let envelope = serde_json::from_value(envelope)
-            .map_err(|_| napi::Error::from_reason("Invalid Neo MemoryCard envelope"))?;
-        Ok(self.task(Operation::Restore(envelope)))
-    }
-
-    #[napi]
-    pub fn snapshot(&self) -> AsyncTask<NeoTask> {
-        self.task(Operation::Snapshot)
     }
 
     #[napi]
@@ -110,11 +80,6 @@ impl NeoSession {
     }
 
     #[napi]
-    pub fn finish_page(&self) -> AsyncTask<NeoTask> {
-        self.task(Operation::FinishPage)
-    }
-
-    #[napi]
     pub fn send_text(&self, destination: String, text: String) -> AsyncTask<NeoTask> {
         self.task(Operation::SendText { destination, text })
     }
@@ -124,7 +89,6 @@ impl NeoSession {
     fn task(&self, operation: Operation) -> AsyncTask<NeoTask> {
         AsyncTask::new(NeoTask {
             session: self.session.clone(),
-            key: self.key.clone(),
             operation: Some(operation),
         })
     }
@@ -132,7 +96,6 @@ impl NeoSession {
 
 pub struct NeoTask {
     session: Arc<Mutex<Session>>,
-    key: Arc<Zeroizing<[u8; 32]>>,
     operation: Option<Operation>,
 }
 
@@ -152,15 +115,12 @@ impl Task for NeoTask {
         let stage = match &operation {
             Operation::StartLogin => "start QR login",
             Operation::PollLogin => "check or complete QR login",
-            Operation::Restore(_) => "restore the saved session",
-            Operation::Snapshot => "seal the session snapshot",
             Operation::Heartbeat => "check session heartbeat",
             Operation::PollIncoming => "wait for incoming message notifications",
             Operation::Sync { .. } => "read a sync page",
-            Operation::FinishPage => "finish a sync page",
             Operation::SendText { .. } => "prepare a text send",
         };
-        run(&mut session, &self.key, operation)
+        run(&mut session, operation)
             .map_err(|_| napi::Error::from_reason(format!("Neo could not {stage}")))
     }
 
@@ -169,7 +129,7 @@ impl Task for NeoTask {
     }
 }
 
-fn run(session: &mut Session, key: &[u8; 32], operation: Operation) -> Result<Value> {
+fn run(session: &mut Session, operation: Operation) -> Result<Value> {
     let client = NativeClient::new(NativeOptions {
         timeout: Duration::from_secs(10),
         ..Default::default()
@@ -207,34 +167,6 @@ fn run(session: &mut Session, key: &[u8; 32], operation: Operation) -> Result<Va
             }
             Ok(json!({ "status": status }))
         }
-        Operation::Restore(envelope) => {
-            ensure!(
-                session.account.is_none() && session.attempt.is_none(),
-                "Session already started"
-            );
-            let (previous, cursor) = storage::open(envelope, key)?;
-            let restored = client.renew_session(&previous, DEVICE_NAME)?;
-            ensure!(
-                restored.uin == previous.uin && restored.own_username == previous.own_username,
-                "Restored account changed"
-            );
-            let result = json!({ "username": restored.own_username });
-            session.account = Some(restored);
-            session.received_cursor = cursor.clone();
-            session.checkpoint = cursor;
-            Ok(result)
-        }
-        Operation::Snapshot => {
-            let state = session
-                .account
-                .as_ref()
-                .ok_or_else(|| anyhow!("No active session"))?;
-            Ok(serde_json::to_value(storage::seal(
-                state,
-                &session.checkpoint,
-                key,
-            )?)?)
-        }
         Operation::Heartbeat => {
             let state = session
                 .account
@@ -263,10 +195,6 @@ fn run(session: &mut Session, key: &[u8; 32], operation: Operation) -> Result<Va
             )))
         }
         Operation::Sync { scene } => {
-            ensure!(
-                !session.pending_checkpoint,
-                "Previous sync page was not handed off"
-            );
             let state = session
                 .account
                 .as_mut()
@@ -276,32 +204,9 @@ fn run(session: &mut Session, key: &[u8; 32], operation: Operation) -> Result<Va
                 .as_mut()
                 .context("No incoming connection")?;
             let batch = connection.sync(state, &session.received_cursor, scene)?;
-            let page = classify_page(batch.commands, &state.own_username);
-            let page_bytes = page
-                .unhandled
-                .iter()
-                .map(|command| command.payload.len().max(1))
-                .sum::<usize>();
-            ensure!(
-                page_bytes <= MAX_UNHANDLED_BYTES - session.unhandled_bytes,
-                "Unhandled sync command limit reached"
-            );
-            let unsupported: Vec<_> = page.unhandled.iter().map(|command| command.id).collect();
-            session.unhandled_bytes += page_bytes;
-            session.unhandled.extend(page.unhandled);
+            let messages = text_messages(batch.commands, &state.own_username);
             session.received_cursor = batch.cursor;
-            session.pending_checkpoint = true;
-            Ok(
-                json!({ "messages": page.messages, "unsupported": unsupported, "continuation": batch.continuation }),
-            )
-        }
-        Operation::FinishPage => {
-            ensure!(session.pending_checkpoint, "No pending page");
-            if session.unhandled.is_empty() {
-                session.checkpoint.clone_from(&session.received_cursor);
-            }
-            session.pending_checkpoint = false;
-            Ok(Value::Null)
+            Ok(json!({ "messages": messages, "continuation": batch.continuation }))
         }
         Operation::SendText { destination, text } => {
             let state = session
@@ -344,16 +249,8 @@ fn submit_once(send: impl FnOnce() -> Result<wire::TextSendResult>) -> Value {
     }
 }
 
-struct Page {
-    messages: Vec<TextMessage>,
-    unhandled: Vec<wire::SyncCommand>,
-}
-
-fn classify_page(commands: Vec<wire::SyncCommand>, username: &str) -> Page {
-    let mut page = Page {
-        messages: vec![],
-        unhandled: vec![],
-    };
+fn text_messages(commands: Vec<wire::SyncCommand>, username: &str) -> Vec<TextMessage> {
+    let mut messages = vec![];
     for command in commands {
         if command.id == 5 {
             if let Ok(message) = wire::decode_add_message(&command.payload, username) {
@@ -362,7 +259,7 @@ fn classify_page(commands: Vec<wire::SyncCommand>, username: &str) -> Page {
                         (message.server_message_id, message.content_text)
                     {
                         if !message.outgoing {
-                            page.messages.push(TextMessage {
+                            messages.push(TextMessage {
                                 id,
                                 from: message.from,
                                 to: message.to,
@@ -370,14 +267,12 @@ fn classify_page(commands: Vec<wire::SyncCommand>, username: &str) -> Page {
                                 timestamp: message.created_at,
                             });
                         }
-                        continue;
                     }
                 }
             }
         }
-        page.unhandled.push(command);
     }
-    page
+    messages
 }
 
 #[cfg(test)]
@@ -396,21 +291,14 @@ mod tests {
     }
 
     #[test]
-    fn unknown_sync_command_keeps_saved_cursor_behind_received_cursor() -> Result<()> {
-        let mut session = Session {
-            received_cursor: vec![2],
-            checkpoint: vec![1],
-            unhandled: vec![wire::SyncCommand {
+    fn unhandled_sync_commands_are_skipped() {
+        let messages = text_messages(
+            vec![wire::SyncCommand {
                 id: 9999,
                 payload: vec![42],
             }],
-            pending_checkpoint: true,
-            ..Default::default()
-        };
-        run(&mut session, &[0; 32], Operation::FinishPage)?;
-        assert_eq!(session.checkpoint, [1]);
-        assert_eq!(session.unhandled[0].payload, [42]);
-        assert!(!session.pending_checkpoint);
-        Ok(())
+            "fixture-self",
+        );
+        assert!(messages.is_empty());
     }
 }

@@ -878,7 +878,6 @@ dependencies = [
  "serde",
  "serde_json",
  "wechat-protocol",
- "zeroize",
 ]
 
 [[package]]

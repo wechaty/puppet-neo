@@ -29,16 +29,20 @@ function run(command, args, cwd, capture = false) {
 try {
   const [pack] = JSON.parse(run(process.execPath, [npmCli, 'pack', '--json', '--pack-destination', scratch], root, true))
   const expectedFiles = [
-    'dist/index.js', 'dist/native-platforms.json', 'docs/v1-spec.md',
+    'dist/index.js', 'dist/native-platforms.json', 'docs/v1-spec.md', 'examples/ding-dong-bot.ts',
     ...requiredPlatforms.flatMap(key => [`native/${key}/neo.node`, `native/${key}/THIRD-PARTY.txt`]),
   ]
   for (const expected of expectedFiles) {
     if (!pack.files.some(file => file.path === expected)) throw new Error(`Packed artifact is missing ${expected}`)
   }
-  writeFileSync(join(scratch, 'package.json'), '{"name":"neo-package-test","private":true}')
-  run(process.execPath, [npmCli, 'install', '--ignore-scripts', '--no-audit', join(scratch, pack.filename), 'wechaty@1.20.2'], scratch)
-  for (const test of ['ding-dong.test.mjs', 'native.test.mjs']) copyFileSync(join(root, 'test', test), join(scratch, test))
-  run(process.execPath, ['--test', 'ding-dong.test.mjs', 'native.test.mjs'], scratch)
+  writeFileSync(join(scratch, 'package.json'), '{"name":"neo-package-test","private":true,"type":"module"}')
+  run(process.execPath, [npmCli, 'install', '--ignore-scripts', '--no-audit', join(scratch, pack.filename)], scratch)
+  mkdirSync(join(scratch, 'test'))
+  mkdirSync(join(scratch, 'examples'))
+  const tests = ['ding-dong.test.ts', 'native.test.ts']
+  for (const test of tests) copyFileSync(join(root, 'test', test), join(scratch, 'test', test))
+  copyFileSync(join(scratch, 'node_modules', 'wechaty-puppet-neo', 'examples', 'ding-dong-bot.ts'), join(scratch, 'examples', 'ding-dong-bot.ts'))
+  run(process.execPath, ['--test', ...tests.map(test => join('test', test))], scratch)
   if (destination) {
     mkdirSync(destination, { recursive: true })
     copyFileSync(join(scratch, pack.filename), join(destination, pack.filename))
