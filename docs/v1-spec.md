@@ -31,7 +31,7 @@ ding-dong-bot.ts
   -> WeChat servers
 ```
 
-Neo builds the addon from pinned crate sources. Cargo.lock and package-lock.json pin build inputs. Native CI builds and tests x64 and ARM64 addons on Linux with glibc and macOS, plus Windows x64. The combined npm tarball contains all five builds and selects one using Node's platform and architecture. The CI-built Linux addons require glibc 2.38 or newer.
+Neo builds the addon from pinned crate sources. Cargo.lock and package-lock.json pin build inputs. Native CI builds and tests Linux x64 and ARM64 with glibc, macOS ARM64 on `macos-latest`, and Windows x64 on `windows-latest`. The combined npm tarball contains all four native builds and selects one using Node's platform and architecture. The CI-built Linux addons require glibc 2.38 or newer.
 
 Blocking native calls run off the Node event loop, and a Rust lock serializes session access. TypeScript schedules login polling, sync and heartbeat, then maps incoming text to Puppet payloads and events. After authentication, Neo opens the account's incoming connection, drains initial sync, and requests NewSync when that connection or a heartbeat signals message work.
 
@@ -58,4 +58,4 @@ An accepted send resolves with no Message object. An uncertain send is reported 
 | Package | Install a tarball in a fresh project and run the Puppet, native and example tests |
 | Live acceptance | Fresh QR login and Ding Dong with an isolated test account, then repeat after restarting |
 
-Start with an npm development release on `next` after acceptance. Follow Wechaty's odd-minor development and even-minor stable convention. Use the combined tarball after its five native package checks pass and report live acceptance separately. Review the repository, installed example and release workflow with the Wechaty maintainers before expanding scope or promoting a stable release. Automatic publication follows that review.
+Start with an npm development release on `next` after acceptance. Follow Wechaty's odd-minor development and even-minor stable convention. Use the combined tarball after its four native package checks pass and report live acceptance separately. Review the repository, installed example and release workflow with the Wechaty maintainers before expanding scope or promoting a stable release. Automatic publication follows that review.

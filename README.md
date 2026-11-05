@@ -6,7 +6,7 @@ The 30-second live terminal demo shows QR login and the standalone TypeScript ex
 
 https://github.com/user-attachments/assets/e7e40c19-ad49-4061-be53-cef1e1c4c978
 
-Neo's native build targets Linux and macOS on x64 and ARM64, plus Windows x64. CI tests an npm install on each target and assembles one tarball with all five addons. The prebuilt Linux addons require glibc 2.38 or newer. Neo loads the addon for the architecture of the running Node process.
+Neo builds native addons for Linux x64 and ARM64, macOS on Apple Silicon, and Windows x64. CI tests an npm install on each target and assembles one tarball with all four addons. The prebuilt Linux addons require glibc 2.38 or newer. Neo loads the addon for the architecture of the running Node process. Use ARM64 Node.js on macOS.
 
 On Windows 11 on ARM, install **x64 Node.js** to use the x64 addon under Windows emulation. Run `node -p process.arch` to check that it prints `x64`. [Microsoft's emulation documentation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation)
 
@@ -15,7 +15,7 @@ To build from source, use Node 24 and Rust 1.93.1 with the matching Rust target.
 | Platform | Build prerequisites |
 | --- | --- |
 | Linux | C compiler, Make, Perl |
-| macOS | Xcode Command Line Tools, Make, Perl |
+| macOS on Apple Silicon | Xcode Command Line Tools, Make, Perl |
 | Windows x64 | MSVC x64 C++ tools, Windows SDK, Perl |
 
 ```sh
