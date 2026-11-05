@@ -24,6 +24,14 @@ npm run build:native
 npm test
 ```
 
+### Development container
+
+A dev container is a reproducible development workspace described in the repository. VS Code's Dev Containers extension can open the project inside that environment so contributors use the same OS and toolchain without installing Node.js or Rust on the host.
+
+The configuration in [`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json) is based on the [Ship.Fail devcontainer template](https://github.com/ShipFail/devcontainer). It uses Ubuntu 24.04, Node.js 24, Rust 1.93.1 with `rustfmt` and `clippy`, and the C compiler, Make, and Perl needed for the native addon. It runs `npm ci` after container creation. It also retains the template's supporting CLI tools and mounts host Claude, Codex, Gemini, and Git configuration into the container; the GitHub CLI helper can use the host Git credential helper. Only use these host mounts when you trust the repository and its development tooling.
+
+Install the VS Code Dev Containers extension, then run **Dev Containers: Reopen in Container** from the Command Palette.
+
 For controlled live acceptance, use a private directory for the card and supply a Base64-encoded random 32-byte key through `PUPPET_NEO_SESSION_KEY`. Keep the key separately so both runs use the same value. Supply the exact username of the confirmed test peer and a fresh challenge.
 
 ```sh
