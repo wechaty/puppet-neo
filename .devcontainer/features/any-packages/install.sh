@@ -36,13 +36,35 @@ echo "🔧 Feature 'any-packages': using USERNAME='${USERNAME}'"
 
 # ---- Normalize PACKAGES into a space-separated list ----
 # Handles: "pkg1, pkg2", "pkg1 pkg2", '["pkg1", "pkg2"]'
-NORMALIZED="$(printf '%s\n' "${PACKAGES}" \
-  | sed -e 's/\[//g' -e 's/\]//g' -e 's/\"//g' \
-  | tr ',' ' ' \
-  | tr -s '[:space:]' ' ')"
+PACKAGE_LIST="${PACKAGES}"
+if [[ "${PACKAGE_LIST}" == \[*\] ]]; then
+  PACKAGE_LIST="${PACKAGE_LIST:1:${#PACKAGE_LIST}-2}"
+fi
 
-# Trim leading/trailing spaces
-NORMALIZED="$(echo "${NORMALIZED}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+NORMALIZED=""
+CURRENT_PACKAGE=""
+EXTRA_DEPTH=0
+for ((i = 0; i < ${#PACKAGE_LIST}; i++)); do
+  CHARACTER="${PACKAGE_LIST:i:1}"
+  if [[ "${CHARACTER}" == '"' ]]; then
+    continue
+  elif [[ "${CHARACTER}" == "[" ]]; then
+    EXTRA_DEPTH=$((EXTRA_DEPTH + 1))
+  elif [[ "${CHARACTER}" == "]" ]]; then
+    EXTRA_DEPTH=$((EXTRA_DEPTH - 1))
+  elif [[ "${EXTRA_DEPTH}" -eq 0 && ( "${CHARACTER}" == "," || "${CHARACTER}" == [[:space:]] ) ]]; then
+    if [ -n "${CURRENT_PACKAGE}" ]; then
+      NORMALIZED="${NORMALIZED} ${CURRENT_PACKAGE}"
+      CURRENT_PACKAGE=""
+    fi
+    continue
+  fi
+  CURRENT_PACKAGE="${CURRENT_PACKAGE}${CHARACTER}"
+done
+if [ -n "${CURRENT_PACKAGE}" ]; then
+  NORMALIZED="${NORMALIZED} ${CURRENT_PACKAGE}"
+fi
+NORMALIZED="${NORMALIZED# }"
 
 if [ -z "${NORMALIZED}" ]; then
   echo "🔧 Feature 'any-packages': After normalization, package list is empty. Nothing to do."
