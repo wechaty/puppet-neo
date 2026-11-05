@@ -37,6 +37,8 @@ echo "🔧 Feature 'any-packages': using USERNAME='${USERNAME}'"
 # ---- Normalize PACKAGES into a space-separated list ----
 # Handles: "pkg1, pkg2", "pkg1 pkg2", '["pkg1", "pkg2"]'
 PACKAGE_LIST="${PACKAGES}"
+PACKAGE_LIST="${PACKAGE_LIST#"${PACKAGE_LIST%%[![:space:]]*}"}"
+PACKAGE_LIST="${PACKAGE_LIST%"${PACKAGE_LIST##*[![:space:]]}"}"
 if [[ "${PACKAGE_LIST}" == \[*\] ]]; then
   PACKAGE_LIST="${PACKAGE_LIST:1:${#PACKAGE_LIST}-2}"
 fi
