@@ -39,7 +39,7 @@
         "ffmpeg",
         "imagemagick",
         "librsvg2-bin",
-        "libvips",
+        "libvips-tools",
         "pandoc",
         "ripgrep",
         "texlive-fonts-recommended",
