@@ -2,9 +2,9 @@
 
 A standalone WeChat protocol Puppet for Wechaty. The TypeScript example uses PuppetNeo directly to log in with a QR code and reply to direct text messages. Authentication stays in memory, so each run needs a fresh QR scan. See the [v1 specification](docs/v1-spec.md) for the architecture and acceptance gates.
 
-The earlier Linux x64 demo shows a fresh QR login, a plain-text `ding`, and the matching `dong` in the recipient's chat.
+The 30-second live terminal demo shows QR login and the standalone TypeScript example exchanging `ding` and `dong` with a second account. It was recorded on Linux x64 with protocol crate 1.4.0. Idle waits are cut.
 
-https://github.com/user-attachments/assets/2087ba0d-6613-492c-8629-481303bad700
+https://github.com/user-attachments/assets/e7e40c19-ad49-4061-be53-cef1e1c4c978
 
 Neo's native build targets Linux and macOS on x64 and ARM64, plus Windows x64. CI tests an npm install on each target and assembles one tarball with all five addons. The prebuilt Linux addons require glibc 2.38 or newer. Neo loads the addon for the architecture of the running Node process.
 
