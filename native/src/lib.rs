@@ -9,7 +9,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use wechat_protocol::{
-    wire, AccountState, DeviceProfile, LoginAttempt, LoginStatus, NativeClient, NativeOptions,
+    wire, AccountPushConnection, DeviceProfile, LoginAttempt, LoginStatus, NativeClient,
+    NativeOptions, TextSendOptions,
 };
 
 const DEVICE_NAME: &str = "Puppet Neo";
@@ -17,8 +18,9 @@ const DEVICE_NAME: &str = "Puppet Neo";
 #[derive(Default)]
 struct Session {
     attempt: Option<LoginAttempt>,
-    account: Option<AccountState>,
-    incoming: Option<wechat_protocol::push::Connection>,
+    /// Owns the accepted credentials after login; account requests share it.
+    account: Option<NativeClient>,
+    incoming: Option<AccountPushConnection>,
     received_cursor: Vec<u8>,
 }
 
@@ -129,11 +131,14 @@ impl Task for NeoTask {
     }
 }
 
-fn run(session: &mut Session, operation: Operation) -> Result<Value> {
-    let client = NativeClient::new(NativeOptions {
+fn options() -> NativeOptions {
+    NativeOptions {
         timeout: Duration::from_secs(10),
         ..Default::default()
-    })?;
+    }
+}
+
+fn run(session: &mut Session, operation: Operation) -> Result<Value> {
     match operation {
         Operation::StartLogin => {
             ensure!(
@@ -141,7 +146,7 @@ fn run(session: &mut Session, operation: Operation) -> Result<Value> {
                 "Login already started"
             );
             let device = DeviceProfile::generate("UnifiedPCLinux x86_64".into())?;
-            let attempt = client.start_qr_login(device, DEVICE_NAME)?;
+            let attempt = NativeClient::new(options())?.start_qr_login(device, DEVICE_NAME)?;
             let output = json!({ "png": STANDARD.encode(&attempt.qr_png) });
             session.attempt = Some(attempt);
             Ok(output)
@@ -151,6 +156,7 @@ fn run(session: &mut Session, operation: Operation) -> Result<Value> {
                 .attempt
                 .as_mut()
                 .ok_or_else(|| anyhow!("No login attempt"))?;
+            let client = NativeClient::new(options())?;
             let status = match client.poll_login(attempt) {
                 Ok(status) => status,
                 Err(error) if wechat_protocol::is_retryable_login_poll_error(&error) => {
@@ -162,24 +168,24 @@ fn run(session: &mut Session, operation: Operation) -> Result<Value> {
                 let mut attempt = session.attempt.take().expect("issued challenge");
                 let state = client.complete_login(&mut attempt)?;
                 let result = json!({ "status": "completed", "username": state.own_username });
-                session.account = Some(state);
+                session.account = Some(NativeClient::from_account(state, options())?);
                 return Ok(result);
             }
             Ok(json!({ "status": status }))
         }
         Operation::Heartbeat => {
-            let state = session
+            let account = session
                 .account
-                .as_mut()
+                .as_ref()
                 .ok_or_else(|| anyhow!("No active session"))?;
             if session.incoming.is_none() {
-                session.incoming = Some(client.push_connection(state)?);
+                session.incoming = Some(account.open_push_connection_blocking()?);
             }
             let connection = session
                 .incoming
                 .as_mut()
                 .context("No incoming connection")?;
-            let beat = connection.heartbeat(state, &session.received_cursor)?;
+            let beat = connection.heartbeat(&session.received_cursor)?;
             Ok(
                 json!({ "sync": beat.selector & 7 != 0, "intervalMs": beat.next_interval.clamp(30, 180) * 1000 }),
             )
@@ -195,23 +201,24 @@ fn run(session: &mut Session, operation: Operation) -> Result<Value> {
             )))
         }
         Operation::Sync { scene } => {
-            let state = session
+            let identity = session
                 .account
-                .as_mut()
-                .ok_or_else(|| anyhow!("No active session"))?;
+                .as_ref()
+                .ok_or_else(|| anyhow!("No active session"))?
+                .account_identity()?;
             let connection = session
                 .incoming
                 .as_mut()
                 .context("No incoming connection")?;
-            let batch = connection.sync(state, &session.received_cursor, scene)?;
-            let messages = text_messages(batch.commands, &state.own_username);
+            let batch = connection.sync(&session.received_cursor, scene)?;
+            let messages = text_messages(batch.commands, &identity.own_username);
             session.received_cursor = batch.cursor;
             Ok(json!({ "messages": messages, "continuation": batch.continuation }))
         }
         Operation::SendText { destination, text } => {
-            let state = session
+            let account = session
                 .account
-                .as_mut()
+                .as_ref()
                 .ok_or_else(|| anyhow!("No active session"))?;
             let created_at =
                 u32::try_from(SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs())?;
@@ -220,8 +227,13 @@ fn run(session: &mut Session, operation: Operation) -> Result<Value> {
             let client_id = u32::from_le_bytes(random).max(1);
             // Validate locally before the operation is allowed to reach transport.
             wire::text_send_request(&destination, &text, created_at, client_id)?;
+            let send = TextSendOptions {
+                created_at,
+                client_message_id: client_id,
+                source: None,
+            };
             Ok(submit_once(|| {
-                client.send_text(state, &destination, &text, created_at, client_id)
+                account.request_blocking(|request| request.send_text(&destination, &text, &send))
             }))
         }
     }
