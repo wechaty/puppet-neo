@@ -1,16 +1,27 @@
 import assert from 'node:assert/strict'
-import { setTimeout as delay } from 'node:timers/promises'
+import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
 import { test } from 'node:test'
 import { types, type payloads } from 'wechaty-puppet'
 import qrTerminal from 'qrcode-terminal'
 import PuppetNeo from 'wechaty-puppet-neo'
-import type { Session } from '../src/native.js'
+import type { SelfProfile, Session } from '../src/native.js'
 
 const username = 'fixture-self'
 const sender = 'fixture-peer'
+// The native addon's error for a session WeChat no longer accepts (SESSION_ENDED).
+const SESSION_ENDED = 'Neo session ended by WeChat'
+const profile: SelfProfile = { nickname: 'Fixture Name', alias: 'fixture-alias', avatar: null }
 
-function scriptedSession(trace: unknown[], result: 'accepted' | 'uncertain' = 'accepted'): Session {
+interface Script {
+  send?: 'accepted' | 'uncertain'
+  profile?: SelfProfile | 'fails'
+  /** Thrown by every heartbeat after the first, which then comes due quickly. */
+  laterHeartbeat?: Error
+}
+
+function scriptedSession(trace: unknown[], script: Script = {}): Session {
   let notified = false
+  let beats = 0
   return {
     async startLogin() {
       trace.push('start-login')
@@ -20,7 +31,9 @@ function scriptedSession(trace: unknown[], result: 'accepted' | 'uncertain' = 'a
       return { status: 'completed', username }
     },
     async heartbeat() {
-      return { sync: false, intervalMs: 5000 }
+      beats++
+      if (beats > 1 && script.laterHeartbeat) throw script.laterHeartbeat
+      return { sync: false, intervalMs: script.laterHeartbeat ? 20 : 5000 }
     },
     async pollIncoming() {
       if (notified) {
@@ -41,36 +54,60 @@ function scriptedSession(trace: unknown[], result: 'accepted' | 'uncertain' = 'a
     },
     async sendText(destination, text) {
       trace.push(['send', destination, text])
-      return { status: result }
+      return { status: script.send ?? 'accepted' }
+    },
+    async lookupSelf() {
+      if (script.profile === 'fails') throw new Error('Neo could not look up the account profile')
+      return script.profile ?? profile
+    },
+    async logout() {
+      trace.push('logout')
+      return { accepted: true }
+    },
+    async close() {
+      trace.push('close')
     },
   }
 }
 
-function nextMessage(puppet: PuppetNeo, timeoutMs: number): Promise<payloads.EventMessage> {
+function waitFor<T>(subscribe: (done: (value: T) => void) => void, label: string, timeoutMs = 5000): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('No message event before the timeout')), timeoutMs)
-    puppet.once('message', payload => {
+    const timer = setTimeout(() => reject(new Error(`No ${label} before the timeout`)), timeoutMs)
+    subscribe(value => {
       clearTimeout(timer)
-      resolve(payload)
+      resolve(value)
     })
   })
+}
+
+function scriptedPuppet(trace: unknown[], script: () => Script) {
+  const puppet = new class extends PuppetNeo {
+    protected override createSession() { return scriptedSession(trace, script()) }
+    protected override scanCode() { return 'fixture-qr' }
+  }()
+  const events = {
+    logins: [] as payloads.EventLogin[],
+    logouts: [] as payloads.EventLogout[],
+    errors: [] as string[],
+  }
+  puppet.on('login', payload => { events.logins.push(payload) })
+  puppet.on('logout', payload => { events.logouts.push(payload) })
+  puppet.on('error', ({ gerror }) => { events.errors.push(gerror ? JSON.parse(gerror).message : 'unknown') })
+  return { puppet, events }
 }
 
 test('the raw Puppet API delivers text and scans again after stopping', async () => {
   const trace: unknown[] = []
   const scans: payloads.EventScan[] = []
-  const errors: payloads.EventError[] = []
-  let result: 'accepted' | 'uncertain' = 'accepted'
-  const puppet = new class extends PuppetNeo {
-    protected override createSession() { return scriptedSession(trace, result) }
-    protected override scanCode() { return 'fixture-qr' }
-  }()
+  let send: 'accepted' | 'uncertain' = 'accepted'
+  const { puppet, events } = scriptedPuppet(trace, () => ({ send }))
   puppet.on('scan', payload => { scans.push(payload) })
-  puppet.on('error', payload => { errors.push(payload) })
   for (const attempt of [1, 2]) {
     trace.length = 0
     scans.length = 0
-    const delivery = nextMessage(puppet, 5000)
+    events.logins.length = 0
+    events.logouts.length = 0
+    const delivery = waitFor<payloads.EventMessage>(done => puppet.once('message', done), 'message')
     await puppet.start()
     try {
       const { messageId } = await delivery
@@ -84,13 +121,94 @@ test('the raw Puppet API delivers text and scans again after stopping', async ()
       assert(scans.some(scan => scan.status === types.ScanStatus.Waiting && scan.qrcode === 'fixture-qr'))
       assert.equal(puppet.memory.name, undefined)
       assert.equal(await puppet.memory.size, 0)
-      assert.deepEqual(errors, [])
+      assert.deepEqual(events.errors, [])
+      assert.deepEqual(events.logins, [{ contactId: username }])
+      const self = await puppet.contactPayload(username)
+      assert.equal(self.name, 'Fixture Name')
+      assert.equal(self.weixin, 'fixture-alias')
+      assert.deepEqual(events.logouts, [])
     } finally {
       await puppet.stop()
     }
+    assert.deepEqual(events.logouts, [{ contactId: username, data: 'puppet stop()' }])
+    assert.equal(trace.at(-1), 'close')
     await assert.rejects(puppet.messageSendText(sender, 'dong'), /offline/)
-    result = 'uncertain'
+    send = 'uncertain'
   }
+})
+
+test('login is reported before the profile and falls back to the username', async () => {
+  const { puppet, events } = scriptedPuppet([], () => ({ profile: 'fails' }))
+  const ready = waitFor(done => puppet.once('ready', done), 'ready')
+  await puppet.start()
+  try {
+    await ready
+    assert.deepEqual(events.logins, [{ contactId: username }])
+    const self = await puppet.contactPayload(username)
+    assert.equal(self.name, username)
+    assert.equal(self.weixin, undefined)
+    assert.deepEqual(events.errors, [])
+  } finally {
+    await puppet.stop()
+  }
+})
+
+test('WeChat ending the session emits logout without an error', async () => {
+  const trace: unknown[] = []
+  const { puppet, events } = scriptedPuppet(trace, () => ({ laterHeartbeat: new Error(SESSION_ENDED) }))
+  const loggedOut = waitFor(done => puppet.once('logout', done), 'logout')
+  await puppet.start()
+  try {
+    assert.deepEqual(await loggedOut, { contactId: username, data: 'WeChat ended the session' })
+    // The base Puppet clears the user one turn after emitting, for logout listeners.
+    await nextTurn()
+    assert.equal(puppet.isLoggedIn, false)
+    assert.deepEqual(events.errors, [])
+    await assert.rejects(puppet.messageSendText(sender, 'dong'), /offline/)
+  } finally {
+    await puppet.stop()
+  }
+  assert.equal(events.logouts.length, 1)
+  assert(!trace.includes('logout'))
+  assert.equal(trace.at(-1), 'close')
+})
+
+test('an unexpected session failure emits error, then logout', async () => {
+  const { puppet, events } = scriptedPuppet([], () => ({
+    laterHeartbeat: new Error('Neo could not check session heartbeat'),
+  }))
+  const loggedOut = waitFor(done => puppet.once('logout', done), 'logout')
+  await puppet.start()
+  try {
+    assert.deepEqual(await loggedOut, { contactId: username, data: 'Neo session failed' })
+    assert.deepEqual(events.errors, ['Neo could not check session heartbeat'])
+    await nextTurn()
+    assert.equal(puppet.isLoggedIn, false)
+  } finally {
+    await puppet.stop()
+  }
+  assert.equal(events.logouts.length, 1)
+})
+
+test('logout() signs the device out once and stop() adds no second logout', async () => {
+  const trace: unknown[] = []
+  const { puppet, events } = scriptedPuppet(trace, () => ({}))
+  const ready = waitFor(done => puppet.once('ready', done), 'ready')
+  await puppet.start()
+  try {
+    await ready
+    await puppet.logout('fixture reason')
+    assert.deepEqual(events.logouts, [{ contactId: username, data: 'fixture reason' }])
+    assert.equal(puppet.isLoggedIn, false)
+    assert.deepEqual(trace.filter(step => step === 'logout'), ['logout'])
+    await assert.rejects(puppet.messageSendText(sender, 'dong'), /offline/)
+    await puppet.logout()
+  } finally {
+    await puppet.stop()
+  }
+  assert.equal(events.logouts.length, 1)
+  assert.deepEqual(trace.filter(step => step === 'logout'), ['logout'])
+  assert.deepEqual(events.errors, [])
 })
 
 test('the TypeScript example replies through PuppetNeo directly', async t => {
@@ -120,6 +238,7 @@ test('the TypeScript example replies through PuppetNeo directly', async t => {
     await delay(15)
   }
   assert.deepEqual(qr.mock.calls[0]?.arguments, ['fixture-qr', { small: true }])
+  assert(output.mock.calls.some(call => call.arguments[0] === 'Logged in as Fixture Name.'))
   assert.deepEqual(trace, ['start-login', ['sync', 6], ['sync', 1], ['send', sender, 'dong']])
   assert.equal(errors.mock.callCount(), 0)
   assert(output.mock.calls.every(call => !String(call.arguments[0]).includes(sender) && !String(call.arguments[0]).includes(username)))

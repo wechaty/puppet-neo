@@ -10,10 +10,13 @@ puppet.on('scan', ({ qrcode, status }) => {
   }
   console.info(`Login status: ${types.ScanStatus[status]}`)
 })
-puppet.on('login', () => console.info('Logged in.'))
+puppet.on('login', async ({ contactId }) => {
+  const self = await puppet.contactPayload(contactId)
+  console.info(`Logged in as ${self.name}.`)
+})
 puppet.on('ready', () => console.info('Ready. Send this account "ding" to receive "dong".'))
-puppet.on('logout', () => console.info('Logged out.'))
-puppet.on('error', ({ data }) => console.error(data))
+puppet.on('logout', ({ data }) => console.info(`Logged out: ${data}`))
+puppet.on('error', ({ gerror }) => console.error(gerror ? JSON.parse(gerror).message : 'Unknown error'))
 puppet.on('message', async ({ messageId }) => {
   try {
     const message = await puppet.messagePayload(messageId)

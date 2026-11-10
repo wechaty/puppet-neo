@@ -14,6 +14,26 @@ use wechat_protocol::{
 };
 
 const DEVICE_NAME: &str = "Puppet Neo";
+/// Error text TypeScript receives when WeChat no longer accepts this session.
+const SESSION_ENDED: &str = "Neo session ended by WeChat";
+/// Service errors that carry WeChat's code for rejected credentials (-13).
+const AUTHENTICATED_REPLIES: [&str; 3] = [
+    "Native envelope returned ",
+    "Heartbeat returned ",
+    "Sync service returned ",
+];
+
+/// WeChat rejected the session's credentials and rejected one renewal.
+#[derive(Debug)]
+struct SessionEnded;
+
+impl std::fmt::Display for SessionEnded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(SESSION_ENDED)
+    }
+}
+
+impl std::error::Error for SessionEnded {}
 
 #[derive(Default)]
 struct Session {
@@ -34,6 +54,13 @@ struct TextMessage {
     timestamp: u32,
 }
 
+#[derive(Default, Serialize)]
+struct SelfProfile {
+    nickname: Option<String>,
+    alias: Option<String>,
+    avatar: Option<String>,
+}
+
 enum Operation {
     StartLogin,
     PollLogin,
@@ -41,6 +68,9 @@ enum Operation {
     PollIncoming,
     Sync { scene: u32 },
     SendText { destination: String, text: String },
+    LookupSelf,
+    Logout,
+    Close,
 }
 
 #[napi]
@@ -85,6 +115,21 @@ impl NeoSession {
     pub fn send_text(&self, destination: String, text: String) -> AsyncTask<NeoTask> {
         self.task(Operation::SendText { destination, text })
     }
+
+    #[napi]
+    pub fn lookup_self(&self) -> AsyncTask<NeoTask> {
+        self.task(Operation::LookupSelf)
+    }
+
+    #[napi]
+    pub fn logout(&self) -> AsyncTask<NeoTask> {
+        self.task(Operation::Logout)
+    }
+
+    #[napi]
+    pub fn close(&self) -> AsyncTask<NeoTask> {
+        self.task(Operation::Close)
+    }
 }
 
 impl NeoSession {
@@ -121,9 +166,17 @@ impl Task for NeoTask {
             Operation::PollIncoming => "wait for incoming message notifications",
             Operation::Sync { .. } => "read a sync page",
             Operation::SendText { .. } => "prepare a text send",
+            Operation::LookupSelf => "look up the account profile",
+            Operation::Logout => "log out",
+            Operation::Close => "close the session",
         };
-        run(&mut session, operation)
-            .map_err(|_| napi::Error::from_reason(format!("Neo could not {stage}")))
+        run(&mut session, operation).map_err(|error| {
+            if error.is::<SessionEnded>() {
+                napi::Error::from_reason(SESSION_ENDED)
+            } else {
+                napi::Error::from_reason(format!("Neo could not {stage}"))
+            }
+        })
     }
 
     fn resolve(&mut self, _env: Env, output: Self::Output) -> napi::Result<Self::JsValue> {
@@ -174,18 +227,7 @@ fn run(session: &mut Session, operation: Operation) -> Result<Value> {
             Ok(json!({ "status": status }))
         }
         Operation::Heartbeat => {
-            let account = session
-                .account
-                .as_ref()
-                .ok_or_else(|| anyhow!("No active session"))?;
-            if session.incoming.is_none() {
-                session.incoming = Some(account.open_push_connection_blocking()?);
-            }
-            let connection = session
-                .incoming
-                .as_mut()
-                .context("No incoming connection")?;
-            let beat = connection.heartbeat(&session.received_cursor)?;
+            let beat = with_renewal(session, heartbeat)?;
             Ok(
                 json!({ "sync": beat.selector & 7 != 0, "intervalMs": beat.next_interval.clamp(30, 180) * 1000 }),
             )
@@ -195,26 +237,20 @@ fn run(session: &mut Session, operation: Operation) -> Result<Value> {
                 .incoming
                 .as_mut()
                 .context("No incoming connection")?;
-            let notification = connection.poll(Duration::from_secs(1))?;
-            Ok(json!(notification.is_some_and(
-                |hint| hint.command == 24 && hint.selector & 7 != 0
-            )))
+            match connection.poll(Duration::from_secs(1)) {
+                Ok(notification) => Ok(json!(
+                    notification.is_some_and(|hint| hint.command == 24 && hint.selector & 7 != 0)
+                )),
+                Err(_) => {
+                    // The notification socket closed. Reconnect and let one
+                    // heartbeat decide whether WeChat still accepts the session.
+                    session.incoming = None;
+                    let beat = with_renewal(session, heartbeat)?;
+                    Ok(json!(beat.selector & 7 != 0))
+                }
+            }
         }
-        Operation::Sync { scene } => {
-            let identity = session
-                .account
-                .as_ref()
-                .ok_or_else(|| anyhow!("No active session"))?
-                .account_identity()?;
-            let connection = session
-                .incoming
-                .as_mut()
-                .context("No incoming connection")?;
-            let batch = connection.sync(&session.received_cursor, scene)?;
-            let messages = text_messages(batch.commands, &identity.own_username);
-            session.received_cursor = batch.cursor;
-            Ok(json!({ "messages": messages, "continuation": batch.continuation }))
-        }
+        Operation::Sync { scene } => with_renewal(session, |session| sync(session, scene)),
         Operation::SendText { destination, text } => {
             let account = session
                 .account
@@ -236,7 +272,119 @@ fn run(session: &mut Session, operation: Operation) -> Result<Value> {
                 account.request_blocking(|request| request.send_text(&destination, &text, &send))
             }))
         }
+        Operation::LookupSelf => lookup_self(session),
+        Operation::Logout => {
+            session.incoming = None;
+            let account = session.account.take().context("No active session")?;
+            // Reserving the logout stops new account requests before submission.
+            let pending = account.prepare_logout()?;
+            let reply = tokio::runtime::Builder::new_current_thread()
+                .build()?
+                .block_on(pending.submit())?;
+            Ok(json!({ "accepted": reply.accepted }))
+        }
+        Operation::Close => {
+            if let Some(account) = session.account.take() {
+                account.stop()?;
+            }
+            *session = Session::default();
+            Ok(Value::Null)
+        }
     }
+}
+
+fn connection(session: &mut Session) -> Result<&mut AccountPushConnection> {
+    if session.incoming.is_none() {
+        let account = session.account.as_ref().context("No active session")?;
+        session.incoming = Some(account.open_push_connection_blocking()?);
+    }
+    session.incoming.as_mut().context("No incoming connection")
+}
+
+fn heartbeat(session: &mut Session) -> Result<wire::Heartbeat> {
+    let cursor = session.received_cursor.clone();
+    connection(session)?.heartbeat(&cursor)
+}
+
+fn sync(session: &mut Session, scene: u32) -> Result<Value> {
+    let own = session
+        .account
+        .as_ref()
+        .context("No active session")?
+        .account_identity()?
+        .own_username;
+    let cursor = session.received_cursor.clone();
+    let batch = connection(session)?.sync(&cursor, scene)?;
+    let messages = text_messages(batch.commands, &own);
+    session.received_cursor = batch.cursor;
+    Ok(json!({ "messages": messages, "continuation": batch.continuation }))
+}
+
+/// Read-only session work can repeat after one renewal. Sends never use this.
+fn with_renewal<T>(
+    session: &mut Session,
+    mut operation: impl FnMut(&mut Session) -> Result<T>,
+) -> Result<T> {
+    match operation(session) {
+        Err(error) if credentials_rejected(&error) => {
+            let account = session.account.as_ref().context("No active session")?;
+            if let Err(renewal) = account.renew_session_blocking(DEVICE_NAME) {
+                return Err(if renewal_rejected(&renewal) {
+                    renewal.context(SessionEnded)
+                } else {
+                    renewal
+                });
+            }
+            // Renewal supersedes the notification socket's credentials.
+            session.incoming = None;
+            operation(session).map_err(|error| {
+                if credentials_rejected(&error) {
+                    error.context(SessionEnded)
+                } else {
+                    error
+                }
+            })
+        }
+        result => result,
+    }
+}
+
+fn service_code(error: &anyhow::Error, prefixes: &[&str]) -> Option<i32> {
+    error.chain().find_map(|cause| {
+        let message = cause.to_string();
+        prefixes
+            .iter()
+            .find_map(|prefix| message.strip_prefix(prefix)?.parse::<i32>().ok())
+    })
+}
+
+fn credentials_rejected(error: &anyhow::Error) -> bool {
+    service_code(error, &AUTHENTICATED_REPLIES) == Some(-13)
+}
+
+fn renewal_rejected(error: &anyhow::Error) -> bool {
+    credentials_rejected(error)
+        || service_code(error, &["Automatic authentication returned "])
+            .is_some_and(|code| code != 0)
+}
+
+fn lookup_self(session: &mut Session) -> Result<Value> {
+    let account = session.account.as_ref().context("No active session")?;
+    let own = account.account_identity()?.own_username;
+    let lookup =
+        account.request_blocking(|request| request.lookup_contacts(std::slice::from_ref(&own)))?;
+    let present = |value: Option<String>| value.filter(|text| !text.is_empty());
+    let profile = lookup
+        .contacts
+        .into_iter()
+        .find(|contact| contact.username == own)
+        .map(|contact| SelfProfile {
+            nickname: present(contact.nickname),
+            alias: present(contact.alias),
+            avatar: present(contact.large_avatar_url).or(present(contact.small_avatar_url)),
+        })
+        .unwrap_or_default();
+    Ok(json!(profile))
 }
 
 fn submit_once(send: impl FnOnce() -> Result<wire::TextSendResult>) -> Value {
@@ -300,6 +448,37 @@ mod tests {
         });
         assert_eq!(attempts, 1);
         assert_eq!(result["status"], "uncertain");
+    }
+
+    #[test]
+    fn only_whole_credential_rejections_end_the_session() {
+        for prefix in AUTHENTICATED_REPLIES {
+            assert!(credentials_rejected(
+                &anyhow!("{prefix}-13").context("read a sync page")
+            ));
+            for other in ["-130", "-1317", "-13 extra", "0"] {
+                assert!(!credentials_rejected(&anyhow!("{prefix}{other}")));
+            }
+        }
+        assert!(!credentials_rejected(&anyhow!("network failed -13")));
+        assert!(renewal_rejected(&anyhow!(
+            "Automatic authentication returned -100"
+        )));
+        assert!(!renewal_rejected(&anyhow!("connection reset")));
+        let ended = anyhow!("Heartbeat returned -13").context(SessionEnded);
+        assert!(ended.is::<SessionEnded>());
+    }
+
+    #[test]
+    fn closing_without_a_session_resets_state() {
+        let mut session = Session {
+            received_cursor: vec![1, 2, 3],
+            ..Default::default()
+        };
+        assert_eq!(run(&mut session, Operation::Close).unwrap(), Value::Null);
+        assert!(session.received_cursor.is_empty());
+        assert!(run(&mut session, Operation::LookupSelf).is_err());
+        assert!(run(&mut session, Operation::Logout).is_err());
     }
 
     #[test]

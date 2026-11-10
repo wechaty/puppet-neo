@@ -9,4 +9,7 @@ test('the compiled addon starts without a storage key and rejects unauthenticate
   const session = puppet.openSession()
   await assert.rejects(session.heartbeat(), /check session heartbeat/)
   await assert.rejects(session.sendText('fixture-peer', 'ding'), /prepare a text send/)
+  await assert.rejects(session.lookupSelf(), /look up the account profile/)
+  await assert.rejects(session.logout(), /log out/)
+  await session.close()
 })
