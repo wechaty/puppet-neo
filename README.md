@@ -10,7 +10,7 @@ Neo builds native addons for Linux x64 and ARM64, macOS on Apple Silicon, and Wi
 
 On Windows 11 on ARM, install **x64 Node.js** to use the x64 addon under Windows emulation. Run `node -p process.arch` to check that it prints `x64`. [Microsoft's emulation documentation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation)
 
-To build from source, use Node 24 and Rust 1.93.1 with the matching Rust target.
+To build from source, use Node.js 26 and Rust 1.93.1 with the matching Rust target.
 
 | Platform | Build prerequisites |
 | --- | --- |

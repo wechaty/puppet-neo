@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { once } from 'node:events'
 import { setTimeout as delay } from 'node:timers/promises'
 import { test } from 'node:test'
 import { types, type payloads } from 'wechaty-puppet'
@@ -47,6 +46,16 @@ function scriptedSession(trace: unknown[], result: 'accepted' | 'uncertain' = 'a
   }
 }
 
+function nextMessage(puppet: PuppetNeo, timeoutMs: number): Promise<payloads.EventMessage> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('No message event before the timeout')), timeoutMs)
+    puppet.once('message', payload => {
+      clearTimeout(timer)
+      resolve(payload)
+    })
+  })
+}
+
 test('the raw Puppet API delivers text and scans again after stopping', async () => {
   const trace: unknown[] = []
   const scans: payloads.EventScan[] = []
@@ -61,10 +70,10 @@ test('the raw Puppet API delivers text and scans again after stopping', async ()
   for (const attempt of [1, 2]) {
     trace.length = 0
     scans.length = 0
-    const delivery = once(puppet, 'message', { signal: AbortSignal.timeout(5000) })
+    const delivery = nextMessage(puppet, 5000)
     await puppet.start()
     try {
-      const [{ messageId }] = await delivery
+      const { messageId } = await delivery
       const message = await puppet.messagePayload(messageId)
       assert.equal(puppet.currentUserId, username)
       assert.equal(message.text, 'ding')
