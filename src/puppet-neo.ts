@@ -2,7 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { Puppet, types, type payloads, type PuppetOptions } from 'wechaty-puppet'
 import jsQR from 'jsqr'
 import { PNG } from 'pngjs'
-import { openNativeSession, type Session } from './native.js'
+import { openNativeSession, SESSION_ENDED, type SelfProfile, type Session } from './native.js'
 
 const CACHE_LIMIT = 2048
 
@@ -35,6 +35,7 @@ export class PuppetNeo extends Puppet {
   private abort?: AbortController
   private session?: Session
   private online = false
+  private selfProfile?: Promise<SelfProfile | undefined>
   private pendingSends = new Set<Promise<unknown>>()
   private readonly contacts = new Map<string, payloads.Contact>()
   private readonly messages = new Map<string, payloads.Message>()
@@ -56,26 +57,53 @@ export class PuppetNeo extends Puppet {
     const session = this.createSession()
     this.abort = abort
     this.session = session
-    this.run = this.serve(session, abort.signal).catch((error: unknown) => {
-      if (!abort.signal.aborted) this.emit('error', { data: error instanceof Error ? error.message : 'Neo session failed' })
+    this.run = this.serve(session, abort.signal).catch(async (error: unknown) => {
+      this.online = false
+      if (abort.signal.aborted) return
+      if (error instanceof Error && error.message === SESSION_ENDED) {
+        await super.logout('WeChat ended the session')
+        return
+      }
+      this.emit('error', { data: error instanceof Error ? error.message : 'Neo session failed' })
+      await super.logout('Neo session failed')
     }).finally(() => {
       this.online = false
     })
   }
 
   override async onStop(): Promise<void> {
-    this.abort?.abort()
     try {
-      await this.run
-      await Promise.allSettled(this.pendingSends)
+      await this.stopServing()
+      await this.session?.close()
     } finally {
       this.abort = undefined
       this.session = undefined
       this.run = undefined
+      this.selfProfile = undefined
       this.contacts.clear()
       this.messages.clear()
-      if (this.isLoggedIn) await super.logout()
+      if (this.isLoggedIn) await super.logout('puppet stop()')
     }
+  }
+
+  /**
+   * Sign this device out of WeChat, then emit `logout`. The puppet stays started;
+   * stop and start it again to log in with a new QR code.
+   */
+  override async logout(reason = 'logout()'): Promise<void> {
+    if (!this.isLoggedIn) return
+    const session = this.session
+    const online = this.online
+    await this.stopServing()
+    if (session && online) {
+      try {
+        const { accepted } = await session.logout()
+        if (!accepted) this.emit('error', { data: 'WeChat did not accept the logout' })
+      } catch (error) {
+        this.emit('error', { data: error instanceof Error ? error.message : 'Neo could not log out' })
+      }
+    }
+    await super.logout(reason)
   }
 
   override ding(data?: string): void {
@@ -93,6 +121,7 @@ export class PuppetNeo extends Puppet {
   }
 
   override async contactRawPayload(id: string): Promise<payloads.Contact> {
+    if (id === this.currentUserId) return this.selfContact(id)
     const contact = this.contacts.get(id)
     if (!contact) throw new Error('Neo has no payload for this contact')
     return contact
@@ -115,6 +144,26 @@ export class PuppetNeo extends Puppet {
       if (result.status === 'rejected') throw new Error('WeChat rejected the text send')
     } finally {
       this.pendingSends.delete(send)
+    }
+  }
+
+  private async stopServing(): Promise<void> {
+    this.abort?.abort()
+    await this.run
+    await Promise.allSettled(this.pendingSends)
+  }
+
+  /** The logged-in account, named by its nickname, WeChat ID or username. */
+  private async selfContact(id: string): Promise<payloads.Contact> {
+    const profile = await this.selfProfile
+    return {
+      id,
+      name: profile?.nickname ?? profile?.alias ?? id,
+      ...(profile?.alias ? { weixin: profile.alias } : {}),
+      avatar: profile?.avatar ?? '',
+      phone: [],
+      type: types.Contact.Individual,
+      gender: types.ContactGender.Unknown,
     }
   }
 
@@ -155,8 +204,9 @@ export class PuppetNeo extends Puppet {
     const username = await this.loginWithQr(session, signal)
     signal.throwIfAborted()
     this.online = true
-    this.rememberContact(username)
-    await this.login(username)
+    // Login is reported at once; the profile lookup finishes in the background.
+    this.selfProfile = session.lookupSelf().catch(() => undefined)
+    this.login(username)
     const associated = await session.heartbeat()
     signal.throwIfAborted()
     let nextHeartbeat = performance.now() + associated.intervalMs

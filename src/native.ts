@@ -1,6 +1,15 @@
 import { createRequire } from 'node:module'
 import platforms from './native-platforms.json' with { type: 'json' }
 
+/** Error message for a session that WeChat no longer accepts. */
+export const SESSION_ENDED = 'Neo session ended by WeChat'
+
+export interface SelfProfile {
+  nickname: string | null
+  alias: string | null
+  avatar: string | null
+}
+
 export interface IncomingText {
   id: string
   from: string
@@ -19,6 +28,9 @@ export interface Session {
   pollIncoming(): Promise<boolean>
   sync(scene: 1 | 6 | 7): Promise<{ messages: IncomingText[], continuation: boolean }>
   sendText(destination: string, text: string): Promise<{ status: 'accepted' | 'rejected' | 'uncertain' }>
+  lookupSelf(): Promise<SelfProfile>
+  logout(): Promise<{ accepted: boolean }>
+  close(): Promise<void>
 }
 
 type Addon = { [K in keyof Session]: (...args: Parameters<Session[K]>) => Promise<string> }
@@ -52,5 +64,8 @@ export function openNativeSession(): Session {
     pollIncoming: async () => JSON.parse(await addon.pollIncoming()),
     sync: async (scene) => JSON.parse(await addon.sync(scene)),
     sendText: async (destination, text) => JSON.parse(await addon.sendText(destination, text)),
+    lookupSelf: async () => JSON.parse(await addon.lookupSelf()),
+    logout: async () => JSON.parse(await addon.logout()),
+    close: async () => { await addon.close() },
   }
 }
