@@ -114,6 +114,8 @@ jobs:
         with:
           node-version: 26
           registry-url: https://registry.npmjs.org
+      # Trusted publishing (OIDC) needs npm 11.5.1 or newer. Use the newest npm 11, the line Node.js 26 LTS ships.
+      - run: npm install --global npm@11.21.2
       - uses: actions/download-artifact@v4
         with:
           name: puppet-neo-npm
