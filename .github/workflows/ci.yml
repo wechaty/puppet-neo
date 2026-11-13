@@ -134,7 +134,8 @@ jobs:
             echo "::error::$TAG is not on main"
             exit 1
           fi
-          tarball="artifacts/wechaty-puppet-neo-$version.tgz"
+          # A leading ./ keeps npm from reading the path as a GitHub owner/repo shorthand.
+          tarball="./artifacts/wechaty-puppet-neo-$version.tgz"
           test -f "$tarball"
           # Wechaty versioning: an odd minor version or a prerelease is a development release.
           minor=$(echo "$version" | cut -d. -f2)
