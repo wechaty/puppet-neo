@@ -96,3 +96,53 @@ jobs:
           name: puppet-neo-npm
           path: artifacts/*.tgz
           if-no-files-found: error
+
+  publish:
+    name: Publish to npm
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          name: puppet-neo-npm
+          path: artifacts
+      - name: Check the tag and choose the dist-tag
+        id: release
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(jq -r .version package.json)
+          if [ "$TAG" != "v$version" ]; then
+            echo "::error::Tag $TAG does not match package version $version"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$TAG is not on main"
+            exit 1
+          fi
+          tarball="artifacts/wechaty-puppet-neo-$version.tgz"
+          test -f "$tarball"
+          # Wechaty versioning: an odd minor version or a prerelease is a development release.
+          minor=$(echo "$version" | cut -d. -f2)
+          if [ $((minor % 2)) -eq 1 ] || [[ "$version" == *-* ]]; then dist_tag=next; else dist_tag=latest; fi
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "dist-tag=$dist_tag" >> "$GITHUB_OUTPUT"
+      # Uses npm trusted publishing (OIDC) when it is configured for this workflow; otherwise the NPM_TOKEN environment secret.
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TARBALL: ${{ steps.release.outputs.tarball }}
+          DIST_TAG: ${{ steps.release.outputs.dist-tag }}
+        run: npm publish "$TARBALL" --access public --provenance --tag "$DIST_TAG"

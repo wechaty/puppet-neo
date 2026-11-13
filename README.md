@@ -31,6 +31,15 @@ Node runs the TypeScript example directly. The commands above build the package 
 
 Run `npm test` for type checking and the offline tests, and `npm run test:package` to check a clean tarball installation.
 
+### Releasing
+
+CI publishes to npm when a `v<version>` tag on `main` is pushed and every platform build and package test passes. The tag must match the `package.json` version. An odd minor version, such as 0.1.x, publishes on the `next` dist-tag; an even minor version publishes on `latest`, following the [Wechaty versioning conventions](https://github.com/wechaty/wechaty/issues/905). The tarball carries npm provenance from this workflow.
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ### Development container
 
 A dev container is a reproducible development workspace described in the repository. VS Code's Dev Containers extension can open the project inside that environment so contributors use the same OS and toolchain without installing Node.js or Rust on the host.
