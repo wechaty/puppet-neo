@@ -25,7 +25,7 @@ npm run build
 node examples/ding-dong-bot.ts
 ```
 
-Scan the terminal QR and confirm the login on your phone. The example prints the account's nickname. After `Ready` appears, send `ding` from another WeChat account. The example replies with `dong` and prints the received message and reply. Signing the device out from the phone, or calling `puppet.logout()`, emits `logout` with the reason. Stop with Ctrl+C. Starting it again displays a new QR.
+Scan the terminal QR and confirm the login on your phone. The example prints the account's nickname. After `Ready` appears, send `ding` from another WeChat account, directly or in a group that includes this account. The example replies with `dong` in the same chat and prints the received message and reply. Signing the device out from the phone, or calling `puppet.logout()`, emits `logout` with the reason. Stop with Ctrl+C. Starting it again displays a new QR.
 
 Node runs the TypeScript example directly. The commands above build the package and native addon from source. To use a prebuilt tarball in another project, install the tarball and copy its `examples/ding-dong-bot.ts` into that project before running it.
 

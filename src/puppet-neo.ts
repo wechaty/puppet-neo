@@ -35,9 +35,10 @@ export class PuppetNeo extends Puppet {
   private abort?: AbortController
   private session?: Session
   private online = false
-  private selfProfile?: Promise<SelfProfile | undefined>
+  private selfProfile?: SelfProfile
   private pendingSends = new Set<Promise<unknown>>()
   private readonly contacts = new Map<string, payloads.Contact>()
+  private readonly rooms = new Map<string, true>()
   private readonly messages = new Map<string, payloads.Message>()
 
   constructor(options: PuppetOptions = {}) {
@@ -81,6 +82,7 @@ export class PuppetNeo extends Puppet {
       this.run = undefined
       this.selfProfile = undefined
       this.contacts.clear()
+      this.rooms.clear()
       this.messages.clear()
       if (this.isLoggedIn) await super.logout('puppet stop()')
     }
@@ -133,8 +135,9 @@ export class PuppetNeo extends Puppet {
 
   override async messageSendText(destination: string, text: string, mentions?: string[]): Promise<void> {
     if (!this.session || !this.online || this.abort?.signal.aborted) throw new Error('Neo session is offline')
-    if (mentions?.length || destination.endsWith('@chatroom') || !this.contacts.has(destination)) {
-      throw new Error('Neo supports direct text to an observed peer')
+    const observed = destination.endsWith('@chatroom') ? this.rooms.has(destination) : this.contacts.has(destination)
+    if (mentions?.length || !observed) {
+      throw new Error('Neo supports text to an observed peer or group')
     }
     const send = this.session.sendText(destination, text)
     this.pendingSends.add(send)
@@ -154,8 +157,8 @@ export class PuppetNeo extends Puppet {
   }
 
   /** The logged-in account, named by its nickname, WeChat ID or username. */
-  private async selfContact(id: string): Promise<payloads.Contact> {
-    const profile = await this.selfProfile
+  private selfContact(id: string): payloads.Contact {
+    const profile = this.selfProfile
     return {
       id,
       name: profile?.nickname ?? profile?.alias ?? id,
@@ -203,15 +206,16 @@ export class PuppetNeo extends Puppet {
     await delay(0, undefined, { signal })
     const username = await this.loginWithQr(session, signal)
     signal.throwIfAborted()
+    // `login` comes with the account's profile. A failed lookup falls back to the username.
+    this.selfProfile = await session.lookupSelf().catch(() => undefined)
+    signal.throwIfAborted()
     this.online = true
-    // Login is reported at once; the profile lookup finishes in the background.
-    this.selfProfile = session.lookupSelf().catch(() => undefined)
     this.login(username)
     const associated = await session.heartbeat()
     signal.throwIfAborted()
     let nextHeartbeat = performance.now() + associated.intervalMs
-    this.emit('ready', {})
     await this.drain(session, 6, signal)
+    this.emit('ready', {})
     while (!signal.aborted) {
       if (performance.now() >= nextHeartbeat) {
         const beat = await session.heartbeat()
@@ -231,12 +235,17 @@ export class PuppetNeo extends Puppet {
       signal.throwIfAborted()
       for (const item of page.messages) {
         if (this.messages.has(item.id)) continue
-        this.rememberContact(item.from)
-        this.rememberContact(item.to)
-        putRecent(this.messages, item.id, {
-          id: item.id, talkerId: item.from, listenerId: item.to,
-          text: item.text, timestamp: item.timestamp, type: types.Message.Text,
-        })
+        this.rememberContact(item.talker)
+        const text = { id: item.id, talkerId: item.talker, text: item.text, timestamp: item.timestamp, type: types.Message.Text }
+        if (item.room) {
+          putRecent(this.rooms, item.room, true)
+          putRecent(this.messages, item.id, { ...text, roomId: item.room })
+        } else if (item.listener) {
+          this.rememberContact(item.listener)
+          putRecent(this.messages, item.id, { ...text, listenerId: item.listener })
+        } else {
+          continue
+        }
         this.emit('message', { messageId: item.id })
       }
       more = page.continuation

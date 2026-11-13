@@ -12,8 +12,12 @@ export interface SelfProfile {
 
 export interface IncomingText {
   id: string
-  from: string
-  to: string
+  /** Who wrote the message; in a group, the member who posted it. */
+  talker: string
+  /** The account that received a direct message. */
+  listener?: string
+  /** The group the message was posted in. */
+  room?: string
   text: string
   timestamp: number
 }
