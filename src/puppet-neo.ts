@@ -29,7 +29,7 @@ function decodeQr(encoded: string) {
 }
 
 export class PuppetNeo extends Puppet {
-  static override readonly VERSION = '0.1.0'
+  static override readonly VERSION = '0.1.1'
 
   private run?: Promise<void>
   private abort?: AbortController

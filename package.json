@@ -1,6 +1,6 @@
 {
   "name": "wechaty-puppet-neo",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A standalone WeChat protocol Puppet for Wechaty",
   "type": "module",
   "main": "./dist/index.js",
