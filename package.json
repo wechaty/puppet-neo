@@ -36,7 +36,7 @@
     "test:package": "node scripts/test-package.mjs"
   },
   "peerDependencies": {
-    "wechaty-puppet": "1.20.2"
+    "wechaty-puppet": "^2.0.0-alpha.19"
   },
   "dependencies": {
     "jsqr": "1.4.0",
