@@ -2,6 +2,8 @@
 
 A standalone WeChat protocol Puppet for Wechaty. The TypeScript example uses PuppetNeo directly to log in with a QR code and reply to direct text messages. Authentication stays in memory, so each run needs a fresh QR scan. See the [v1 specification](docs/v1-spec.md) for the architecture and acceptance gates.
 
+Neo is a Puppet for Wechaty 2.0: it needs `wechaty-puppet` 2.0 as a peer dependency (`npm install wechaty-puppet@next`). Wechaty 2.0 loads it with `WECHATY_PUPPET=wechaty-puppet-neo`.
+
 The 30-second live terminal demo shows QR login and the standalone TypeScript example exchanging `ding` and `dong` with a second account. It was recorded on Linux x64 with protocol crate 1.4.0. Idle waits are cut.
 
 https://github.com/user-attachments/assets/e7e40c19-ad49-4061-be53-cef1e1c4c978

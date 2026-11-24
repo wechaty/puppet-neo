@@ -1,4 +1,4 @@
-import { types } from 'wechaty-puppet'
+import { helpers, types } from 'wechaty-puppet'
 import qrTerminal from 'qrcode-terminal'
 import PuppetNeo from 'wechaty-puppet-neo'
 
@@ -8,7 +8,7 @@ puppet.on('scan', ({ qrcode, status }) => {
   if (qrcode && status === types.ScanStatus.Waiting) {
     qrTerminal.generate(qrcode, { small: true })
   }
-  console.info(`Login status: ${types.ScanStatus[status]}`)
+  console.info(`Login status: ${helpers.typeName(types.ScanStatus, status)}`)
 })
 puppet.on('login', async ({ contactId }) => {
   const self = await puppet.contactPayload(contactId)
